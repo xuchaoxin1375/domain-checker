@@ -26,7 +26,7 @@ from .settings import (
     public_config,
     save_config_to_file,
 )
-from .state import task_lock, task_pause_flags, task_storage
+from .state import task_lock, task_pause_flags, task_cancel_flags, task_storage
 from .tasks import generate_task_id, process_domains_async
 
 # 日志配置（CLI 场景下各自配置，这里仅对未配置过的环境生效）
@@ -305,7 +305,8 @@ def _register_routes(flask_app: Flask):
 
     @flask_app.route('/api/cancel/<task_id>', methods=['POST'])
     def api_cancel(task_id):
-        task_pause_flags[task_id] = True
+        task_cancel_flags[task_id] = True
+        task_pause_flags[task_id] = False
         with task_lock:
             if task_id in task_storage:
                 task_storage[task_id]['status'] = 'cancelled'
