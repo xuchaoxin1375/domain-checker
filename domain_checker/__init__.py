@@ -11,4 +11,4 @@
     web       —— Flask 应用与 HTTP API
 """
 
-__version__ = '2.5.0'
+__version__ = '2.6.0'

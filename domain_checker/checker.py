@@ -14,6 +14,35 @@ from .state import task_lock, task_pause_flags, task_storage
 
 logger = logging.getLogger(__name__)
 
+# WHOIS 响应中表示"域名未注册"的常见关键词（小写匹配）。
+# 不同注册局/TLD 的措辞各异，统一收敛为快速返回，避免无意义重试。
+_NOT_FOUND_MARKERS = (
+    'no match', 'not found', 'domain not found', 'no data found',
+    'no entries found', 'not registered', 'has not been registered',
+    'not been registered', 'no object found', 'no such domain',
+    'status: available', 'available for registration',
+)
+
+# 未注册结果的固定错误文案，前端/导出/日志共用此措辞
+NOT_REGISTERED_MESSAGE = '域名未被注册'
+
+
+def is_domain_not_found(exc: Exception) -> bool:
+    """判断异常是否代表"域名未注册"（而非网络/服务器问题）。"""
+    if isinstance(exc, whois.exceptions.WhoisDomainNotFoundError):
+        return True
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _NOT_FOUND_MARKERS)
+
+
+def not_registered_result(domain: str) -> dict:
+    return {
+        'domain': domain, 'status': 'not_registered',
+        'registrar': None, 'registration_date': None, 'expiration_date': None,
+        'updated_date': None, 'name_servers': None, 'dnssec': None,
+        'error': NOT_REGISTERED_MESSAGE
+    }
+
 
 def get_proxies() -> dict:
     """获取代理配置（当前 python-whois 不使用，保留给后续 HTTP 类平台）。"""
@@ -96,7 +125,11 @@ def query_whois_with_retry(domain: str) -> dict:
         try:
             time.sleep(cfg['rate_limit_delay'] + random.uniform(0.1, 0.3))
 
-            w = whois.whois(domain)
+            try:
+                # CONFIG['timeout'] 走 socket 超时；旧版 python-whois 无 timeout 参数则回退
+                w = whois.whois(domain, timeout=cfg['timeout'])
+            except TypeError:
+                w = whois.whois(domain)
 
             result = {
                 'domain': domain, 'status': 'success',
@@ -128,16 +161,23 @@ def query_whois_with_retry(domain: str) -> dict:
             logger.info(f"[{domain}] WHOIS成功")
             return result
 
-        except whois.exceptions.PywhoisError as e:
-            last_error = f'WHOIS解析错误: {str(e)[:80]}'
-            logger.warning(f"[{domain}] {last_error}")
-        except whois.exceptions.WhoisDomainNotFoundError as e:
-            last_error = f'域名不存在: {str(e)[:50]}'
-            logger.warning(f"[{domain}] {last_error}")
+        except whois.exceptions.WhoisDomainNotFoundError:
+            # 域名未注册是确定性结论：立即返回，不重试（重试只会让等待更久）
+            logger.info(f"[{domain}] {NOT_REGISTERED_MESSAGE}")
+            return not_registered_result(domain)
         except whois.exceptions.WhoisQuotaExceededError as e:
             last_error = f'查询配额超限: {str(e)[:50]}'
             logger.warning(f"[{domain}] {last_error}")
+        except whois.exceptions.PywhoisError as e:
+            if is_domain_not_found(e):
+                logger.info(f"[{domain}] {NOT_REGISTERED_MESSAGE}")
+                return not_registered_result(domain)
+            last_error = f'WHOIS解析错误: {str(e)[:80]}'
+            logger.warning(f"[{domain}] {last_error}")
         except Exception as e:
+            if is_domain_not_found(e):
+                logger.info(f"[{domain}] {NOT_REGISTERED_MESSAGE}")
+                return not_registered_result(domain)
             last_error = f'查询异常: {str(e)[:80]}'
             logger.warning(f"[{domain}] {last_error}")
 
@@ -203,7 +243,9 @@ def process_single_domain(domain: str, task_id: 'str | None' = None) -> dict:
 
                 # 日志
                 log_level = 'info'
-                if result['status'] != 'success':
+                if result['status'] == 'not_registered':
+                    log_level = 'warn'
+                elif result['status'] != 'success':
                     log_level = 'error'
                 elif resolve_result['resolved'] is False:
                     log_level = 'warn'

@@ -53,13 +53,28 @@ CONFIG = {
 # 保存到 settings.json / 历史记录快照时剔除的敏感字段
 PRIVATE_CONFIG_KEYS = {'proxy_auth'}
 
-# 查询平台元信息（仅用于界面展示与记录；当前实现统一走 WHOIS 协议，
-# 接入真实的多平台查询属于已知扩展点，见 docs/ARCHITECTURE.md）
+# 查询平台元信息。implemented=False 的平台当前未接入专用接口，
+# 实际查询自动回落 WHOIS 标准协议（前后端都会向用户明示，避免误解）。
+# 接入真实的多平台查询属于已知扩展点，见 docs/ARCHITECTURE.md「扩展指南」。
 PLATFORMS = {
-    'whois': {'name': 'WHOIS标准查询', 'icon': '🔍', 'desc': '使用标准WHOIS协议'},
-    'whoisxml': {'name': 'WHOIS XML', 'icon': '🌐', 'desc': '使用WHOIS XML API'},
-    'rdap': {'name': 'RDAP安全查询', 'icon': '🛡️', 'desc': '使用RDAP协议，更安全'}
+    'whois': {
+        'name': 'WHOIS标准查询', 'icon': '🔍', 'implemented': True,
+        'desc': '使用标准 WHOIS 协议（43端口）直连注册局，信息全面：注册商、注册/过期/更新日期、DNS服务器、DNSSEC'
+    },
+    'whoisxml': {
+        'name': 'WHOIS XML', 'icon': '🌐', 'implemented': False,
+        'desc': '第三方 WHOIS XML API（whoisxmlapi.com，需 API 密钥），数据结构化、稳定。暂未接入，当前自动使用 WHOIS 标准协议'
+    },
+    'rdap': {
+        'name': 'RDAP安全查询', 'icon': '🛡️', 'implemented': False,
+        'desc': '基于 HTTPS 的注册数据访问协议（RFC 7480），返回结构化 JSON、更安全。暂未接入，当前自动使用 WHOIS 标准协议'
+    }
 }
+
+
+def is_platform_implemented(platform: str) -> bool:
+    """平台是否已接入专用查询接口（否则实际使用 WHOIS 标准协议）。"""
+    return bool(PLATFORMS.get(platform, {}).get('implemented', False))
 
 
 def public_config() -> dict:

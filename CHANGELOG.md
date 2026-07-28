@@ -5,6 +5,35 @@
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-07-28
+
+体验与信息透明度优化版本。
+
+### 变更（性能与行为）
+
+- **查询未注册域名不再耗时重试**：WHOIS 返回"No match/NOT FOUND"等确定性结论时立即返回
+  `not_registered`（原地重试 3 次约需 10 秒 → 现在一次即返回），错误文案统一为「域名未被注册」；
+  配额/网络等临时性错误仍按原策略重试
+- WHOIS 请求接入 `CONFIG['timeout']` 的 socket 超时（旧版 python-whois 自动回退兼容）
+- 任务状态新增 `not_registered`：前端表格显示「未注册」徽标与单独统计卡、
+  日志级别为 warn、导出文案「域名未被注册」、CLI 显示 `⊘ 未注册`
+- 修正 WHOIS 异常捕获顺序：`WhoisDomainNotFoundError`/`WhoisQuotaExceededError`
+  是 `PywhoisError` 的子类，此前被父类捕获导致专属分支永远不生效
+- 历史记录中旧的"域名不存在/WHOIS解析错误"类失败结果保持原样，新查询才会有新状态
+
+### 新增
+
+- **平台能力提示**：`PLATFORMS` 增加 `implemented` 与详细 `desc`；WHOIS XML / RDAP
+  目前未接入专用接口（自动回落 WHOIS 标准协议），页面选择时给出常驻提示与 Toast、
+  任务启动时运行日志中也会写明实际查询方式，配置面板下方新增各平台效果与信息介绍
+- **页面侧边栏大纲**：查询配置/输入域名/运行日志/查询结果/历史记录 五项锚点跳转，
+  支持收起为悬浮按钮，收起状态保存到 localStorage；窄屏（<1250px）自动隐藏
+
+### 测试
+
+- 新增 5 例：未注册快速返回与"不重试"保证、配额错误仍重试、平台元信息完整性、
+  导出 not_registered 文案；现共 43 例
+
 ## [2.5.0] - 2026-07-28
 
 工程化重构版本：**行为不变**，重点为可维护性、可测试性与文档。
@@ -58,7 +87,8 @@
 初始发布基线：批量 WHOIS 查询、暂停/继续/取消、单条与批量重查、多主题、表格排序、
 历史记录（SQLite）、CSV/Excel 导出、URL 自动提取域名、限流与自动重试、多平台选择界面。
 
-[Unreleased]: https://github.com/xuchaoxin1375/domain-checker/compare/v2.5.0...HEAD
+[Unreleased]: https://github.com/xuchaoxin1375/domain-checker/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/xuchaoxin1375/domain-checker/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/xuchaoxin1375/domain-checker/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/xuchaoxin1375/domain-checker/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/xuchaoxin1375/domain-checker/releases/tag/v2.3.0

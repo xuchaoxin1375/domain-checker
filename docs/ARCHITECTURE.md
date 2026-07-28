@@ -64,6 +64,20 @@ POST /api/query
 - 重查（retry/retry-failed）：对内存任务按"同域名覆盖、否则追加"的方式更新结果，
   并置 `refresh=True` 通知前端整表刷新；重查只支持内存任务（重启后不可用）
 
+### 查询结果状态判定
+
+`process_single_domain` 的 `status` 取值：
+
+| status | 含义 | 触发 |
+|--------|------|------|
+| `success` | WHOIS 成功（进入 DNS 检查） | - |
+| `not_registered` | 域名未被注册 | WHOIS 响应含确定性未注册结论（`WhoisDomainNotFoundError` 或 `_NOT_FOUND_MARKERS` 关键词），**立即返回不重试** |
+| `failed` | 查询最终失败 | 配额超限/解析错误/网络异常等，重试 `max_retries` 次后仍失败 |
+| `invalid` | 输入格式非法 | `is_valid_domain` 未通过 |
+
+注意 WHOIS 异常体系为 `WhoisDomainNotFoundError → WhoisError → PywhoisError`，
+捕获顺序必须具体在前，父类在后。
+
 ### 解析状态判定
 
 `check_domain_resolved` 只在 WHOIS 成功后调用，因此"域名不存在"从语义上不成立：
@@ -113,11 +127,19 @@ CONFIG 默认值 (settings.py)
 
 ### 接入新的查询平台（如真实 RDAP）
 
-1. 在 `settings.PLATFORMS` 增加元信息
-2. 在 `checker.py` 增加 `_query_rdap_with_retry(domain)`，返回结构对齐
-   `query_whois_with_retry` 的 result dict
-3. 在 `process_single_domain` 按 `CONFIG['platform']` 分派（保留 whois 为默认分支）
-4. `settings.json`/历史快照会自动带上新平台；前端按钮会自动渲染（按 PLATFORMS 顺序除外，需加按钮）
+### 接入新的查询平台（如真实 RDAP / WHOIS XML）
+
+当前状态：`PLATFORMS` 含三个平台，其中 `whoisxml`/`rdap` 为 `implemented=False`——
+前端选择时会显示常驻提示与 Toast，`tasks.process_domains_async` 会在运行日志首行
+写明实际使用 WHOIS 标准协议。接入步骤：
+
+1. 在 `checker.py` 增加 `_query_xxx_with_retry(domain)`，返回结构对齐
+   `query_whois_with_retry` 的 result dict（含 `not_registered` 语义）
+2. 在 `process_single_domain` 按 `CONFIG['platform']` 分派（保留 whois 为默认分支）
+3. `settings.PLATFORMS[key]['implemented'] = True`，并更新 `desc`
+4. 前端 `templates/index.html` 中的 `platforms` 对象同步 desc/implemented（前端不读后端 PLATFORMS，
+   保持两处一致）
+5. 更新 README 平台表与 CHANGELOG
 
 ### 新增导出格式
 

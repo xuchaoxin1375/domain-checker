@@ -94,6 +94,8 @@ def main():
         if result['status'] == 'success':
             exp = result['expiration_date'] or '未知'
             print(f"✓ 成功 | 过期: {exp}")
+        elif result['status'] == 'not_registered':
+            print("⊘ 未注册")
         else:
             print(f"✗ 失败 | {result['error']}")
 

@@ -15,7 +15,9 @@ def _results():
         {'domain': 'held.com', 'status': 'success', 'resolved': False,
          'dns_records': [], 'block_reason': '未解析（NXDOMAIN）：域名已注册但DNS中无解析记录'},
         {'domain': 'bad.com', 'status': 'failed', 'resolved': None,
-         'dns_records': [], 'block_reason': '', 'error': '域名不存在'},
+         'dns_records': [], 'block_reason': '', 'error': 'boom'},
+        {'domain': 'never.com', 'status': 'not_registered', 'resolved': None,
+         'dns_records': [], 'block_reason': '', 'error': '域名未被注册'},
     ]
 
 
@@ -31,6 +33,9 @@ class TestCsv:
             assert rows[1][8] == '正常解析'
             assert rows[2][8] == '未解析'
             assert rows[3][8] == '未知'
+            # 未注册状态导出为明确文案
+            assert rows[4][1] == '域名未被注册'
+            assert rows[4][-1] == '域名未被注册'
         finally:
             os.remove(path)
 
@@ -47,10 +52,10 @@ class TestXlsx:
 
 class TestFilters:
     @pytest.mark.parametrize('filter_type,expected', [
-        ('all', {'ok.com', 'held.com', 'bad.com'}),
+        ('all', {'ok.com', 'held.com', 'bad.com', 'never.com'}),
         ('success', {'ok.com', 'held.com'}),
         ('normal', {'ok.com'}),
-        ('failed', {'bad.com'}),
+        ('failed', {'bad.com', 'never.com'}),
         ('blocked', {'held.com'}),
     ])
     def test_filter_matrix(self, filter_type, expected):
