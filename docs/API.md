@@ -29,7 +29,13 @@ Base URL：`http://localhost:5000`（或启动日志输出的地址）。所有�
   "proxy_url": "http://127.0.0.1:7897",
   "platform": "whois",            // whois | whoisxml | rdap
   "allow_lan_access": true,
-  "platforms": { /* 平台元信息 */ },
+  // 平台元信息。implemented=false 表示未接入专用接口，实际查询自动回落 WHOIS 标准协议，
+  // 页面与运行日志均会向用户明示；desc 为各平台效果与信息介绍
+  "platforms": {
+    "whois":    { "name": "WHOIS标准查询", "icon": "🔍", "implemented": true,  "desc": "..." },
+    "whoisxml": { "name": "WHOIS XML",     "icon": "🌐", "implemented": false, "desc": "..." },
+    "rdap":     { "name": "RDAP安全查询",  "icon": "🛡️", "implemented": false, "desc": "..." }
+  },
   "server": {                     // 服务器实际监听状态
     "bind_host": "0.0.0.0",       // 未启动 run_server 时为 null
     "port": 5000,
@@ -96,6 +102,12 @@ curl -X POST localhost:5000/api/config \
   "logs": [ {"time":"11:10:07","level":"warn","message":"✗ x.com [未解析: ...]"} ],
   "refresh": false }
 ```
+
+`results[].status ∈ {success, failed, not_registered, invalid}`：
+- `success`：WHOIS 成功（同时有 DNS 检查字段）
+- `not_registered`：域名未被注册（`error` 固定为「域名未被注册」，**不再重试**，单次即返回）
+- `failed`：重试后仍失败（`error` 为最后错误）
+- `invalid`：域名格式非法
 
 `results[].resolved ∈ {true,false,null}` 对应 正常解析 / 未解析 / 未知；
 `refresh=true` 表示发生了重查，前端应丢弃旧全表。日志最多返回最近 100 条。

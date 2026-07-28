@@ -525,12 +525,98 @@
             font-size: 11px;
             font-weight: 500;
         }
+
+        /* 平台效果与信息介绍 */
+        .platform-info-list { width: 100%; margin-top: 4px; display: flex; flex-direction: column; gap: 6px; }
+        .platform-info-item {
+            font-size: 12px;
+            color: var(--text-secondary);
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 10px;
+            line-height: 1.6;
+            transition: background 0.3s, border-color 0.3s;
+        }
+        .platform-info-item .pi-name { font-weight: 600; color: var(--text-primary); margin-right: 6px; }
+        .platform-info-item .pi-status { font-size: 11px; padding: 1px 8px; border-radius: 10px; white-space: nowrap; }
+        .pi-status.ok { background: rgba(40,167,69,0.15); color: var(--success); }
+        .pi-status.pending { background: rgba(255,193,7,0.15); color: var(--warning); }
+
+        /* 侧边栏大纲 */
+        .outline-sidebar {
+            position: fixed;
+            right: 14px;
+            top: 110px;
+            z-index: 200;
+            width: 132px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            padding: 10px;
+            transition: background 0.3s, border-color 0.3s;
+        }
+        .outline-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+        .outline-toggle {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 12px;
+            color: var(--text-secondary);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        .outline-toggle:hover { color: var(--primary); background: var(--bg-main); }
+        .outline-item {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            padding: 6px 8px;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: color 0.2s, background 0.2s;
+        }
+        .outline-item:hover { color: var(--primary); background: var(--bg-main); }
+        .outline-fab {
+            position: fixed;
+            right: 14px;
+            top: 110px;
+            z-index: 200;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            font-size: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        @media (max-width: 1250px) {
+            .outline-sidebar, .outline-fab { display: none !important; }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌐 域名批量查询系统 v2.5</h1>
+            <h1>🌐 域名批量查询系统 v2.6</h1>
             <p style="color: var(--text-secondary); font-size: 14px;">
                 <span class="platform-badge" id="currentPlatform">
                     <span>🔍</span>
@@ -548,7 +634,7 @@
         <!-- 查询页面 -->
         <div id="tabQuery">
             <!-- 配置面板 -->
-            <div class="card">
+            <div class="card" id="configCard">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                     <h2 class="card-title" style="margin: 0;">⚙️ 查询配置</h2>
                     <div class="theme-section">
@@ -578,6 +664,9 @@
                         <button class="platform-btn" data-platform="whoisxml" onclick="setPlatform('whoisxml')">🌐 WHOIS XML</button>
                         <button class="platform-btn" data-platform="rdap" onclick="setPlatform('rdap')">🛡️ RDAP安全</button>
                     </div>
+                    <span id="platformHint" style="font-size: 12px; color: var(--warning); display: none; width: 100%;"></span>
+                    <!-- 各平台效果与信息介绍（由 JS 渲染，与下方 platforms 定义保持同步） -->
+                    <div class="platform-info-list" id="platformInfoList"></div>
                 </div>
                 
                 <!-- 代理配置 -->
@@ -606,7 +695,7 @@
             </div>
             
             <!-- 输入区域 -->
-            <div class="card">
+            <div class="card" id="inputCard">
                 <h2 class="card-title">📋 输入域名</h2>
                 <textarea id="domains" placeholder="支持多种格式输入：
 example.com
@@ -655,6 +744,7 @@ https://www.example.com/path/to/page"></textarea>
                     <div class="stat-item"><div class="stat-value" id="statTotal">0</div><div class="stat-label">总计</div></div>
                     <div class="stat-item"><div class="stat-value" id="statSuccess">0</div><div class="stat-label">成功</div></div>
                     <div class="stat-item"><div class="stat-value" id="statFailed">0</div><div class="stat-label">失败</div></div>
+                    <div class="stat-item"><div class="stat-value" id="statNotRegistered">0</div><div class="stat-label">未注册</div></div>
                     <div class="stat-item"><div class="stat-value" id="statBlocked">0</div><div class="stat-label">未解析</div></div>
                     <div class="stat-item"><div class="stat-value" id="statNormal">0</div><div class="stat-label">正常</div></div>
                 </div>
@@ -721,6 +811,20 @@ https://www.example.com/path/to/page"></textarea>
     </div>
     
     <div class="toast-container" id="toastContainer"></div>
+
+    <!-- 侧边栏大纲（支持收起，状态保存在本地） -->
+    <aside class="outline-sidebar" id="outlineSidebar">
+        <div class="outline-header">
+            <span>📑 大纲</span>
+            <button class="outline-toggle" onclick="toggleSidebar(true)" title="收起大纲">«</button>
+        </div>
+        <button class="outline-item" onclick="scrollToSection('configCard')">⚙️ 查询配置</button>
+        <button class="outline-item" onclick="scrollToSection('inputCard')">📋 输入域名</button>
+        <button class="outline-item" onclick="scrollToSection('logCard')">📜 运行日志</button>
+        <button class="outline-item" onclick="scrollToSection('resultsCard')">📊 查询结果</button>
+        <button class="outline-item" onclick="switchTab('history')">📚 历史记录</button>
+    </aside>
+    <button class="outline-fab" id="outlineFab" onclick="toggleSidebar(false)" title="打开大纲">☰</button>
     
     <script>
         let currentTaskId = null;
@@ -737,11 +841,14 @@ https://www.example.com/path/to/page"></textarea>
         // 排序状态
         let sortState = { column: null, ascending: true };
         
-        // 平台信息
+        // 平台信息（implemented=false 的平台未接入专用接口，实际自动使用 WHOIS 标准协议）
         const platforms = {
-            whois: { name: 'WHOIS标准查询', icon: '🔍', desc: '使用标准WHOIS协议查询' },
-            whoisxml: { name: 'WHOIS XML', icon: '🌐', desc: '使用WHOIS XML API查询' },
-            rdap: { name: 'RDAP安全查询', icon: '🛡️', desc: '使用RDAP协议查询，更安全' }
+            whois: { name: 'WHOIS标准查询', icon: '🔍', implemented: true,
+                     desc: '使用标准 WHOIS 协议（43端口）直连注册局，信息全面：注册商、注册/过期/更新日期、DNS服务器、DNSSEC' },
+            whoisxml: { name: 'WHOIS XML', icon: '🌐', implemented: false,
+                        desc: '第三方 WHOIS XML API（whoisxmlapi.com，需 API 密钥），数据结构化、稳定。暂未接入，当前自动使用 WHOIS 标准协议' },
+            rdap: { name: 'RDAP安全查询', icon: '🛡️', implemented: false,
+                    desc: '基于 HTTPS 的注册数据访问协议（RFC 7480），返回结构化 JSON、更安全。暂未接入，当前自动使用 WHOIS 标准协议' }
         };
         
         // Toast
@@ -804,9 +911,30 @@ https://www.example.com/path/to/page"></textarea>
                 btn.classList.remove('active');
             });
             document.querySelector(`.platform-btn[data-platform="${platform}"]`).classList.add('active');
-            
             document.getElementById('platformName').textContent = platforms[platform].name;
-            showToast(`已切换到: ${platforms[platform].name}`, 'info');
+            
+            // 未接入的平台要明确提示，避免用户误以为使用了对应接口
+            const hint = document.getElementById('platformHint');
+            if (platforms[platform].implemented) {
+                hint.style.display = 'none';
+                showToast(`已切换到: ${platforms[platform].name}`, 'info');
+            } else {
+                hint.textContent = `⚠️ 「${platforms[platform].name}」暂未接入专用接口，本次查询将自动使用 WHOIS 标准协议，结果与「WHOIS标准」一致`;
+                hint.style.display = 'inline';
+                showToast(`${platforms[platform].name} 暂未接入，将使用 WHOIS 标准协议查询`, 'info');
+            }
+        }
+        
+        // 渲染各平台效果与信息介绍
+        function renderPlatformInfo() {
+            const list = document.getElementById('platformInfoList');
+            if (!list) return;
+            list.innerHTML = Object.entries(platforms).map(([key, p]) => {
+                const status = p.implemented
+                    ? '<span class="pi-status ok">已接入</span>'
+                    : '<span class="pi-status pending">接入中</span>';
+                return `<div class="platform-info-item"><span class="pi-name">${p.icon} ${p.name}</span>${status}<br>${escapeHtml(p.desc)}</div>`;
+            }).join('');
         }
         
         // Tab切换（不依赖全局 event，支持程序化调用）
@@ -1057,6 +1185,7 @@ https://www.example.com/path/to/page"></textarea>
                 tr.dataset.domain = r.domain;
                 
                 let statusBadge = r.status === 'success' ? '<span class="badge badge-success">✓ 成功</span>' :
+                                  r.status === 'not_registered' ? '<span class="badge badge-invalid">未注册</span>' :
                                   r.status === 'failed' ? '<span class="badge badge-failed">✗ 失败</span>' :
                                   '<span class="badge badge-invalid">无效</span>';
                 
@@ -1102,12 +1231,14 @@ https://www.example.com/path/to/page"></textarea>
             const total = results.length;
             const success = results.filter(r => r.status === 'success').length;
             const failed = total - success;
+            const notRegistered = results.filter(r => r.status === 'not_registered').length;
             const blocked = results.filter(r => r.resolved === false).length;
             const normal = results.filter(r => r.status === 'success' && r.resolved !== false).length;
             
             document.getElementById('statTotal').textContent = total;
             document.getElementById('statSuccess').textContent = success;
             document.getElementById('statFailed').textContent = failed;
+            document.getElementById('statNotRegistered').textContent = notRegistered;
             document.getElementById('statBlocked').textContent = blocked;
             document.getElementById('statNormal').textContent = normal;
             document.getElementById('btnRetryFail').disabled = failed === 0;
@@ -1305,9 +1436,30 @@ https://www.example.com/path/to/page"></textarea>
             return div.innerHTML;
         }
         
+        // 侧边栏大纲
+        function toggleSidebar(collapse) {
+            document.getElementById('outlineSidebar').classList.toggle('hidden', collapse);
+            document.getElementById('outlineFab').style.display = collapse ? 'flex' : 'none';
+            localStorage.setItem('domainCheckerSidebarCollapsed', collapse ? '1' : '0');
+        }
+        
+        function scrollToSection(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (currentTab !== 'query') switchTab('query');
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        
+        function initSidebar() {
+            const collapsed = localStorage.getItem('domainCheckerSidebarCollapsed') === '1';
+            toggleSidebar(collapsed);
+        }
+        
         // 初始化
         loadTheme();
         loadConfig();
+        renderPlatformInfo();
+        initSidebar();
     </script>
 </body>
 </html>

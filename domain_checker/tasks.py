@@ -13,6 +13,7 @@ from datetime import datetime
 
 from .checker import process_single_domain
 from .db import save_history, save_results, update_history_counts
+from .settings import PLATFORMS, is_platform_implemented
 from .state import task_lock, task_pause_flags, task_storage
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,14 @@ def process_domains_async(domains: list, task_id: str):
             'level': 'info',
             'message': f'任务开始，共 {total} 个域名'
         })
+        # 平台未接入时明示实际查询方式，避免运行日志与所选平台不符引起误解
+        platform = task_storage[task_id].get('platform', 'whois')
+        if not is_platform_implemented(platform):
+            task_storage[task_id]['logs'].append({
+                'time': datetime.now().strftime('%H:%M:%S'),
+                'level': 'warn',
+                'message': f"⚠ 「{PLATFORMS[platform]['name']}」暂未接入专用接口，本任务实际使用 WHOIS 标准协议查询"
+            })
 
     # 保存初始历史
     save_history(task_id, domains, 'processing')

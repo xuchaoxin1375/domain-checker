@@ -48,6 +48,14 @@ class TestConfig:
         client.post('/api/config', json={'platform': 'nope'})
         assert client.get('/api/config').get_json()['platform'] == 'whois'
 
+    def test_platforms_have_impl_and_desc(self, client):
+        platforms = client.get('/api/config').get_json()['platforms']
+        assert platforms['whois']['implemented'] is True
+        assert platforms['whoisxml']['implemented'] is False
+        assert platforms['rdap']['implemented'] is False
+        for p in platforms.values():
+            assert p.get('desc'), '每个平台都应带效果与信息介绍'
+
 
 class TestQueryValidation:
     def test_empty_input(self, client):

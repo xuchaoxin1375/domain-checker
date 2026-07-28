@@ -15,7 +15,8 @@ EXPORT_DIR = tempfile.gettempdir()
 EXPORT_HEADERS = ['域名', '状态', '注册商', '注册日期', '过期日期', '更新时间',
                   'DNS服务器', 'DNSSEC', '解析状态', 'DNS记录', '解析异常原因', '错误备注']
 
-STATUS_MAP = {'success': '查询成功', 'failed': '查询失败', 'invalid': '格式无效'}
+STATUS_MAP = {'success': '查询成功', 'failed': '查询失败',
+              'invalid': '格式无效', 'not_registered': '域名未被注册'}
 RESOLVED_MAP = {True: '正常解析', False: '未解析', None: '未知'}
 
 

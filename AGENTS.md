@@ -65,7 +65,10 @@ python cli.py --help
 
 ## 常见任务速查
 
-- **加查询平台**：见 ARCHITECTURE「扩展指南」；注意前端平台按钮也要加
+- **加查询平台**：见 ARCHITECTURE「扩展指南」。注意三处同步：`settings.PLATFORMS`、
+  前端 `platforms` 对象（desc/implemented）、README 平台表；前端不读后端 PLATFORMS
+- **改「未注册」语义**：`checker._NOT_FOUND_MARKERS` 与 `NOT_REGISTERED_MESSAGE`；
+  未注册是确定性结论立即返回，切勿再加重试
 - **加导出格式**：`export.py` 新增函数 + `create_export_file` 分派 + `web.api_export` mimetype
 - **加 API**：`web._register_routes` 分组内添加；补 `tests/test_api.py`
 - **改启动监听**：`web.run_server`（`DOMAIN_CHECKER_HOST/PORT` 与 `allow_lan_access` 的优先级）
