@@ -50,6 +50,8 @@ def init_db():
             task_id TEXT NOT NULL,
             domain TEXT NOT NULL,
             status TEXT,
+            whois_status TEXT,
+            hold_status TEXT,
             registrar TEXT,
             registration_date TEXT,
             expiration_date TEXT,
@@ -60,10 +62,26 @@ def init_db():
             block_reason TEXT,
             dns_records TEXT,
             error TEXT,
+            raw_response TEXT,
+            query_time TEXT,
+            query_duration_seconds REAL,
             created_at TEXT NOT NULL,
             FOREIGN KEY (task_id) REFERENCES query_history(task_id)
         )
     ''')
+
+    # 为已有数据库补齐新字段，避免升级时丢失历史记录。
+    cursor.execute('PRAGMA table_info(query_results)')
+    existing_columns = {row[1] for row in cursor.fetchall()}
+    for column, definition in {
+        'whois_status': 'TEXT',
+        'hold_status': 'TEXT',
+        'query_time': 'TEXT',
+        'query_duration_seconds': 'REAL',
+        'raw_response': 'TEXT',
+    }.items():
+        if column not in existing_columns:
+            cursor.execute(f'ALTER TABLE query_results ADD COLUMN {column} {definition}')
 
     conn.commit()
     conn.close()
@@ -127,15 +145,18 @@ def save_results(task_id: str, results: list):
 
         cursor.execute('''
             INSERT INTO query_results
-            (task_id, domain, status, registrar, registration_date, expiration_date, updated_date,
-             name_servers, dnssec, resolved, block_reason, dns_records, error, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (task_id, domain, status, whois_status, hold_status, registrar, registration_date,
+             expiration_date, updated_date, name_servers, dnssec, resolved, block_reason,
+             dns_records, error, raw_response, query_time, query_duration_seconds, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            task_id, r.get('domain', ''), r.get('status', ''), r.get('registrar', ''),
+            task_id, r.get('domain', ''), r.get('status', ''), r.get('whois_status', ''),
+            r.get('hold_status', ''), r.get('registrar', ''),
             r.get('registration_date', ''), r.get('expiration_date', ''), r.get('updated_date', ''),
             r.get('name_servers', ''), r.get('dnssec', ''),
             1 if r.get('resolved') is True else (0 if r.get('resolved') is False else None),
-            r.get('block_reason', ''), dns_records, r.get('error', ''),
+            r.get('block_reason', ''), dns_records, r.get('error', ''), r.get('raw_response'),
+            r.get('query_time', ''), r.get('query_duration_seconds'),
             datetime.now().isoformat()
         ))
 

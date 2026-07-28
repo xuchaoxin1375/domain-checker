@@ -1,6 +1,7 @@
 # AGENTS.md — 代码助手接手指南
 
-写给 coding agent（以及想快速上手的人）：先读这里的速览与陷阱，动手前按"常用命令"自检。
+写给 coding agent（以及想快速上手的人）：先读这里的速览与陷阱，再到
+[`spec/README.md`](spec/README.md) 按任务选择专题规格，动手前按"常用命令"自检。
 
 ## 项目速览
 
@@ -19,7 +20,7 @@
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 
-pytest            # 全部测试（38 例；网络调用已 mock，可离线运行）
+pytest            # 全部测试（网络调用已 mock，可离线运行）
 ruff check .      # 代码检查（CI 同款，配置在 pyproject.toml）
 python app.py     # 启动，默认 5000 端口；控制台会打印局域网访问状态
 python cli.py --help
@@ -39,6 +40,7 @@ python cli.py --help
 | `templates/index.html` | 前端；Tab 切换按 `data-tab` 属性定位（勿回退到全局 `event`） |
 | `tests/` | 每类功能一个文件；conftest 已隔离数据目录 |
 | `docs/ARCHITECTURE.md` | 想改架构/流程前先读它 |
+| `spec/README.md` | Coding Agent 渐进式规格入口，按任务选读 |
 
 ## 必须遵守的约束
 
@@ -54,6 +56,8 @@ python cli.py --help
 6. **lint 配置有意的取舍**：中文全角标点（RUF001-003）已显式忽略，不要"修正常";`== False`
    等三值布尔比较（True/False/None）语义化保留，如需改写用 `is False`。
 7. 线程内访问 `task_storage/CONFIG` 持锁（`task_lock`/`config_lock`），锁内不做数据库 IO。
+8. **默认不做截图检查**：除非用户明确要求截图，否则前端验证使用自动测试、JavaScript 语法检查或
+   无截图的浏览器 DOM 检查。
 
 ## 改动的完成 checklist
 

@@ -18,6 +18,8 @@ def _results():
          'dns_records': [], 'block_reason': '', 'error': 'boom'},
         {'domain': 'never.com', 'status': 'not_registered', 'resolved': None,
          'dns_records': [], 'block_reason': '', 'error': '域名未被注册'},
+        {'domain': 'slow.com', 'status': 'timeout', 'resolved': None,
+         'dns_records': [], 'block_reason': '', 'error': 'WHOIS 查询超时，无法确认域名状态'},
     ]
 
 
@@ -36,6 +38,7 @@ class TestCsv:
             # 未注册状态导出为明确文案
             assert rows[4][1] == '域名未被注册'
             assert rows[4][-1] == '域名未被注册'
+            assert rows[5][1] == '查询超时'
         finally:
             os.remove(path)
 
@@ -52,10 +55,12 @@ class TestXlsx:
 
 class TestFilters:
     @pytest.mark.parametrize('filter_type,expected', [
-        ('all', {'ok.com', 'held.com', 'bad.com', 'never.com'}),
+        ('all', {'ok.com', 'held.com', 'bad.com', 'slow.com', 'never.com'}),
         ('success', {'ok.com', 'held.com'}),
         ('normal', {'ok.com'}),
-        ('failed', {'bad.com', 'never.com'}),
+        ('failed', {'bad.com'}),
+        ('timeout', {'slow.com'}),
+        ('not_registered', {'never.com'}),
         ('blocked', {'held.com'}),
     ])
     def test_filter_matrix(self, filter_type, expected):

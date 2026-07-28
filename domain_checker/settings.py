@@ -41,7 +41,7 @@ CONFIG = {
     'rate_limit_delay': 1.0,          # 请求间隔(秒)
     'max_retries': 3,                 # 最大重试次数
     'retry_delay': 2,                 # 重试间隔(秒)
-    'timeout': 15,                    # 超时时间(秒)
+    'timeout': 15,                    # WHOIS/DNS/HTTP 单阶段超时时间(秒)
     'max_workers': 5,                 # 并发线程数
     'proxy_enabled': False,           # 是否启用代理
     'proxy_url': 'http://127.0.0.1:7897',  # 代理地址
@@ -49,6 +49,30 @@ CONFIG = {
     'platform': 'whois',              # 查询平台: whois, whoisxml, rdap
     'allow_lan_access': True,         # 是否允许局域网访问（关闭后仅监听 127.0.0.1，重启生效）
 }
+
+TIMEOUT_MIN_SECONDS = 1
+TIMEOUT_MAX_SECONDS = 120
+
+
+def normalize_timeout(value) -> int:
+    """将外部超时配置限制在可用范围内，避免无效设置中断任务线程。"""
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        value = 15
+    return max(TIMEOUT_MIN_SECONDS, min(TIMEOUT_MAX_SECONDS, value))
+
+# 查询模式只作用于当前任务，不写入全局配置。不限流模式取消主动等待，仍受并发、超时和重试次数约束。
+QUERY_MODES = {
+    'unlimited': {'name': '不限流模式', 'rate_limit_delay': 0.0, 'retry_delay': 0.0},
+    'standard': {'name': '标准模式', 'rate_limit_delay': None, 'retry_delay': None},
+    'quick': {'name': '快速模式', 'rate_limit_delay': 0.1, 'retry_delay': 0.5},
+}
+
+
+def normalize_query_mode(mode: str | None) -> str:
+    """将外部查询模式收敛为受支持的值。"""
+    return mode if isinstance(mode, str) and mode in QUERY_MODES else 'unlimited'
 
 # 保存到 settings.json / 历史记录快照时剔除的敏感字段
 PRIVATE_CONFIG_KEYS = {'proxy_auth'}
@@ -91,7 +115,7 @@ def load_config_from_file():
             with config_lock:
                 for k, v in saved.items():
                     if k in CONFIG and k not in PRIVATE_CONFIG_KEYS:
-                        CONFIG[k] = v
+                        CONFIG[k] = normalize_timeout(v) if k == 'timeout' else v
             logger.info(f"已加载配置文件: {SETTINGS_PATH}")
     except Exception as e:
         logger.warning(f"加载配置文件失败: {e}")

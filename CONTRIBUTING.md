@@ -1,7 +1,9 @@
 # 参与贡献
 
 感谢你愿意改进这个项目！本文档覆盖环境搭建、代码规范、测试与提交流程。
-如果你是 coding agent，请优先阅读 [AGENTS.md](AGENTS.md)。
+如果你是 coding agent，请优先阅读 [AGENTS.md](AGENTS.md)，再通过
+[spec/README.md](spec/README.md) 按任务加载专题。完整开发流程见
+[spec/development-workflow.md](spec/development-workflow.md)。
 
 ## 环境搭建
 

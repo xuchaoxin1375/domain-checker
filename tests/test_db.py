@@ -7,6 +7,8 @@ from domain_checker.settings import DB_PATH
 def _sample_results(n=3):
     return [{
         'domain': f'sample{i}.com', 'status': 'success' if i % 2 == 0 else 'failed',
+        'whois_status': 'clientHold' if i == 1 else 'ok',
+        'hold_status': 'clientHold' if i == 1 else '',
         'registrar': 'X Registrar', 'registration_date': '2024-01-01',
         'expiration_date': '2027-01-01', 'updated_date': '',
         'name_servers': 'ns1.x.com', 'dnssec': '',
@@ -14,6 +16,9 @@ def _sample_results(n=3):
         'block_reason': '' if i % 2 == 0 else '未解析（NXDOMAIN）',
         'dns_records': ['1.2.3.4'] if i % 2 == 0 else [],
         'error': '' if i % 2 == 0 else 'boom',
+        'raw_response': f'raw response {i}',
+        'query_time': f'2026-07-28 12:00:0{i}',
+        'query_duration_seconds': i + 0.25,
     } for i in range(n)]
 
 
@@ -42,6 +47,11 @@ class TestHistoryRoundTrip:
         assert rows[1]['resolved'] == 0
         assert rows[2]['resolved'] == 1
         assert rows[0]['dns_records'] == '1.2.3.4'
+        assert rows[1]['whois_status'] == 'clientHold'
+        assert rows[1]['hold_status'] == 'clientHold'
+        assert rows[1]['query_time'] == '2026-07-28 12:00:01'
+        assert rows[1]['query_duration_seconds'] == 1.25
+        assert rows[1]['raw_response'] == 'raw response 1'
 
     def test_save_results_overwrites(self):
         results = _sample_results(3)

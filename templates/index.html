@@ -19,6 +19,12 @@
             --warning: #ffc107;
             --danger: #dc3545;
             --info: #17a2b8;
+            --sidebar-bg: #f3f3f3;
+            --sidebar-hover: #e8e8e8;
+            --sidebar-active: #dddddd;
+            --sidebar-text: #444444;
+            --sidebar-muted: #666666;
+            --sidebar-border: #d4d4d4;
         }
         
         /* 暗色主题 */
@@ -35,6 +41,12 @@
             --warning: #ffca28;
             --danger: #ef5350;
             --info: #29b6f6;
+            --sidebar-bg: #181818;
+            --sidebar-hover: #2a2d2e;
+            --sidebar-active: #37373d;
+            --sidebar-text: #cccccc;
+            --sidebar-muted: #999999;
+            --sidebar-border: #2b2b2b;
         }
         
         /* 绿色主题 */
@@ -51,6 +63,12 @@
             --warning: #ffc107;
             --danger: #ef4444;
             --info: #06b6d4;
+            --sidebar-bg: #ecfdf5;
+            --sidebar-hover: #d1fae5;
+            --sidebar-active: #a7f3d0;
+            --sidebar-text: #14532d;
+            --sidebar-muted: #3f7254;
+            --sidebar-border: #a7f3d0;
         }
         
         /* 紫色主题 */
@@ -67,6 +85,12 @@
             --warning: #ffc107;
             --danger: #ef4444;
             --info: #06b6d4;
+            --sidebar-bg: #faf5ff;
+            --sidebar-hover: #f3e8ff;
+            --sidebar-active: #e9d5ff;
+            --sidebar-text: #581c87;
+            --sidebar-muted: #7e5b96;
+            --sidebar-border: #e9d5ff;
         }
         
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -89,6 +113,7 @@
             transition: color 0.3s;
         }
         .header h1 { font-size: 1.8rem; margin-bottom: 5px; }
+        .header-version { margin-left: 6px; color: var(--text-secondary); font-size: 0.65em; font-weight: 500; }
         
         .card {
             background: var(--bg-card);
@@ -130,6 +155,81 @@
             outline: none;
             border-color: var(--primary);
         }
+        .preset-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+        .preset-label { color: var(--text-secondary); font-size: 12px; }
+        .preset-btn {
+            padding: 5px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            background: var(--bg-main);
+            color: var(--text-primary);
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .preset-btn:hover { color: var(--primary); border-color: var(--primary); }
+        .query-mode-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
+        .query-mode-label { color: var(--text-secondary); font-size: 12px; }
+        .query-mode-buttons { display: inline-flex; border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; }
+        .query-mode-btn {
+            min-height: 28px;
+            padding: 4px 11px;
+            border: 0;
+            border-right: 1px solid var(--border-color);
+            background: var(--bg-main);
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .query-mode-btn:last-child { border-right: 0; }
+        .query-mode-btn:hover { color: var(--primary); }
+        .query-mode-btn.active { background: var(--primary); color: #fff; font-weight: 700; }
+        .query-mode-hint { color: var(--text-secondary); font-size: 11px; }
+        .query-timeout-field { display: inline-flex; align-items: center; gap: 5px; color: var(--text-secondary); font-size: 12px; }
+        .query-timeout-field input {
+            width: 64px;
+            padding: 5px 7px;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            background: var(--bg-card);
+            color: var(--text-primary);
+            font-size: 12px;
+        }
+        .domain-editor {
+            display: grid;
+            grid-template-columns: 46px minmax(0, 1fr);
+            height: 150px;
+            min-height: 100px;
+            resize: vertical;
+            overflow: hidden;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-card);
+            transition: border-color 0.2s;
+        }
+        .domain-editor:focus-within { border-color: var(--primary); }
+        .line-numbers {
+            padding: 12px 9px 12px 0;
+            overflow: hidden;
+            border-right: 1px solid var(--border-color);
+            background: var(--bg-main);
+            color: var(--text-secondary);
+            font: 13px/1.5 'Consolas', 'Monaco', monospace;
+            text-align: right;
+            user-select: none;
+            white-space: pre;
+        }
+        #domains {
+            height: 100%;
+            min-width: 0;
+            padding: 12px;
+            border: 0;
+            border-radius: 0;
+            resize: none;
+            font: 13px/1.5 'Consolas', 'Monaco', monospace;
+            white-space: pre;
+            overflow: auto;
+        }
+        #domains:focus { border-color: transparent; }
         
         .btn {
             padding: 10px 18px;
@@ -304,8 +404,54 @@
         .theme-btn.purple { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
         
         /* 进度 */
-        .progress-section { display: none; margin-top: 15px; }
+        .progress-section { display: none; margin: 15px 0 24px; }
         .progress-section.active { display: block; }
+        .query-activity {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-height: 54px;
+            margin-bottom: 10px;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-left: 3px solid var(--primary);
+            border-radius: 6px;
+            background: var(--bg-card);
+        }
+        .query-activity.processing {
+            position: fixed;
+            top: 12px;
+            left: 50%;
+            z-index: 500;
+            width: min(520px, calc(100vw - 40px));
+            margin: 0;
+            transform: translateX(-50%);
+            box-shadow: 0 8px 28px rgba(0,0,0,0.2);
+        }
+        .query-spinner {
+            width: 22px;
+            height: 22px;
+            flex: 0 0 22px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: query-spin 0.8s linear infinite;
+        }
+        .query-activity.completed { border-left-color: var(--success); }
+        .query-activity.completed .query-spinner {
+            border: none;
+            animation: none;
+            color: var(--success);
+            font-size: 20px;
+        }
+        .query-activity.completed .query-spinner::before { content: '✓'; }
+        .query-activity.cancelled { border-left-color: var(--warning); }
+        .query-activity.cancelled .query-spinner { display: none; }
+        .query-activity-main { min-width: 0; flex: 1; }
+        .query-activity-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+        .query-activity-detail { margin-top: 3px; font-size: 12px; color: var(--text-secondary); }
+        .query-elapsed { font: 600 13px 'Consolas', 'Monaco', monospace; color: var(--text-primary); white-space: nowrap; }
+        @keyframes query-spin { to { transform: rotate(360deg); } }
         .progress-bar {
             height: 22px;
             background: var(--bg-main);
@@ -389,33 +535,90 @@
         }
         .badge-success { background: rgba(40,167,69,0.15); color: var(--success); }
         .badge-failed { background: rgba(220,53,69,0.15); color: var(--danger); }
+        .badge-timeout { background: rgba(245,158,11,0.18); color: var(--warning); }
         .badge-invalid { background: rgba(255,193,7,0.15); color: var(--warning); }
         .badge-blocked { background: rgba(239,68,68,0.15); color: var(--danger); }
         .badge-resolved { background: rgba(40,167,69,0.15); color: var(--success); }
         
         .error-text { color: var(--danger); font-size: 11px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .domain-cell { font-weight: 600; color: var(--text-primary); cursor: pointer; }
+        .domain-cell-wrap { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .domain-cell { font-weight: 600; color: var(--text-primary); cursor: pointer; text-decoration: none; }
         .domain-cell:hover { color: var(--primary); text-decoration: underline; }
-        .retry-icon { margin-left: 5px; color: var(--primary); font-size: 12px; }
+        .retry-domain-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            min-height: 27px;
+            padding: 3px 8px;
+            border: 1px solid var(--primary);
+            border-radius: 5px;
+            background: color-mix(in srgb, var(--primary) 12%, var(--bg-card));
+            color: var(--primary);
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.2s, color 0.2s, transform 0.2s;
+        }
+        .retry-domain-btn:hover { background: var(--primary); color: #fff; transform: translateY(-1px); }
+        .retry-domain-btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+        .retry-action-btn {
+            min-height: 34px;
+            padding-inline: 14px;
+            border: 2px solid rgba(255,255,255,0.55);
+            font-weight: 700;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+        }
+        .retry-action-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.18); }
+        .copy-domain-btn {
+            width: 26px;
+            height: 26px;
+            padding: 0;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 15px;
+            line-height: 1;
+            transition: color 0.2s, border-color 0.2s, background 0.2s;
+        }
+        .copy-domain-btn:hover { color: var(--primary); border-color: var(--primary); background: var(--bg-main); }
+        .copy-domain-btn.copied { color: var(--success); border-color: var(--success); }
+        .whois-status {
+            display: block;
+            max-width: 190px;
+            margin-top: 4px;
+            color: var(--text-secondary);
+            font-size: 11px;
+            line-height: 1.35;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .query-time-cell { white-space: nowrap; color: var(--text-secondary); font-size: 12px; }
         
         /* 日志 */
         .log-container {
-            background: var(--bg-main);
-            border-radius: 8px;
-            padding: 12px;
-            max-height: 180px;
+            background: #181818;
+            color: #cccccc;
+            border-radius: 6px;
+            padding: 8px 0;
+            max-height: 300px;
             overflow-y: auto;
             font-family: 'Consolas', 'Monaco', monospace;
             font-size: 12px;
-            line-height: 1.6;
-            border: 1px solid var(--border-color);
-            transition: background 0.3s, border-color 0.3s;
+            line-height: 1.5;
+            border: 1px solid #333333;
         }
-        .log-line { margin: 3px 0; }
-        .log-time { color: var(--text-secondary); margin-right: 10px; }
-        .log-info { color: var(--success); }
-        .log-warn { color: var(--warning); }
-        .log-error { color: var(--danger); }
+        .log-line { display: grid; grid-template-columns: 72px 54px minmax(0, 1fr); gap: 8px; padding: 3px 12px; }
+        .log-line:hover { background: #2a2d2e; }
+        .log-time { color: #858585; }
+        .log-level { font-size: 10px; font-weight: 700; text-transform: uppercase; }
+        .log-info .log-level { color: #4fc1ff; }
+        .log-warn .log-level { color: #cca700; }
+        .log-error .log-level { color: #f48771; }
+        .log-message { color: #cccccc; overflow-wrap: anywhere; }
         
         /* 导出选项 */
         .export-bar {
@@ -440,6 +643,28 @@
             transition: background 0.3s, color 0.3s, border-color 0.3s;
         }
         .export-bar span { font-size: 13px; color: var(--text-secondary); }
+        .result-filter-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding: 10px 12px;
+            margin-bottom: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-main);
+        }
+        .result-filter-title { color: var(--text-primary); font-size: 13px; font-weight: 700; }
+        .result-filter-field { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; }
+        .result-filter-bar select {
+            padding: 6px 9px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-card);
+            color: var(--text-primary);
+            font-size: 12px;
+        }
+        .result-filter-count { margin-left: auto; color: var(--text-secondary); font-size: 12px; }
         
         /* 历史记录 */
         .history-section { margin-top: 20px; }
@@ -498,6 +723,42 @@
         }
         @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         @keyframes fadeOut { to { opacity: 0; transform: translateX(50px); } }
+
+        /* 结果详情弹窗 */
+        .detail-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 900;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: rgba(0,0,0,0.48);
+        }
+        .detail-dialog {
+            width: min(760px, 100%);
+            max-height: min(720px, calc(100vh - 40px));
+            overflow: auto;
+            padding: 20px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-card);
+            color: var(--text-primary);
+            box-shadow: 0 18px 50px rgba(0,0,0,0.28);
+        }
+        .detail-dialog-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+        .detail-dialog-title { min-width: 0; flex: 1; font-size: 18px; overflow-wrap: anywhere; }
+        .detail-close-btn { flex: 0 0 auto; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border-color); border-radius: 5px; background: transparent; color: var(--text-secondary); font-size: 20px; cursor: pointer; }
+        .detail-close-btn:hover { color: var(--danger); border-color: var(--danger); }
+        .detail-summary { margin-bottom: 14px; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+        .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; }
+        .detail-item { min-width: 0; padding: 9px 10px; border-bottom: 1px solid var(--border-color); }
+        .detail-item.full { grid-column: 1 / -1; }
+        .detail-label { display: block; margin-bottom: 3px; color: var(--text-secondary); font-size: 11px; }
+        .detail-value { color: var(--text-primary); font-size: 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
+        .detail-result-btn { min-height: 27px; padding: 3px 8px; border: 1px solid var(--border-color); border-radius: 5px; background: var(--bg-main); color: var(--text-primary); font-size: 11px; cursor: pointer; white-space: nowrap; }
+        .detail-result-btn:hover { color: var(--primary); border-color: var(--primary); background: var(--bg-card); }
+        @media (max-width: 700px) { .detail-grid { grid-template-columns: 1fr; } .detail-item.full { grid-column: auto; } }
         
         .hidden { display: none !important; }
         .btn-paused { background: #fd7e14; }
@@ -513,19 +774,6 @@
             border-left: 3px solid var(--primary);
         }
         
-        /* 平台徽章 */
-        .platform-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 4px 10px;
-            background: var(--primary);
-            color: white;
-            border-radius: 12px;
-            font-size: 11px;
-            font-weight: 500;
-        }
-
         /* 平台效果与信息介绍 */
         .platform-info-list { width: 100%; margin-top: 4px; display: flex; flex-direction: column; gap: 6px; }
         .platform-info-item {
@@ -543,86 +791,202 @@
         .pi-status.ok { background: rgba(40,167,69,0.15); color: var(--success); }
         .pi-status.pending { background: rgba(255,193,7,0.15); color: var(--warning); }
 
-        /* 侧边栏大纲 */
+        /* VS Code 风格侧边栏大纲 */
         .outline-sidebar {
             position: fixed;
-            right: 14px;
-            top: 110px;
+            right: 0;
+            top: 0;
             z-index: 200;
-            width: 132px;
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 10px;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-            padding: 10px;
-            transition: background 0.3s, border-color 0.3s;
+            width: 176px;
+            height: 100vh;
+            background: var(--sidebar-bg);
+            color: var(--sidebar-text);
+            border-left: 1px solid var(--sidebar-border);
+            box-shadow: -4px 0 16px rgba(0,0,0,0.12);
+            transition: width 0.2s ease, background 0.3s, color 0.3s;
         }
+        .outline-sidebar.sidebar-left { left: 0; right: auto; border-left: 0; border-right: 1px solid var(--sidebar-border); box-shadow: 4px 0 16px rgba(0,0,0,0.12); }
+        .outline-sidebar.sidebar-right { right: 0; left: auto; }
         .outline-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 6px;
+            height: 42px;
+            padding: 0 10px 0 16px;
+            border-bottom: 1px solid var(--sidebar-border);
+            font-size: 11px;
+            color: var(--sidebar-muted);
+            text-transform: uppercase;
         }
+        .outline-title { margin-right: auto; }
         .outline-toggle {
             background: none;
             border: none;
             cursor: pointer;
-            font-size: 12px;
-            color: var(--text-secondary);
-            padding: 2px 6px;
-            border-radius: 4px;
+            width: 28px;
+            height: 28px;
+            color: var(--sidebar-text);
+            font-size: 16px;
         }
-        .outline-toggle:hover { color: var(--primary); background: var(--bg-main); }
+        .outline-toggle:hover { color: var(--primary); background: var(--sidebar-hover); }
         .outline-item {
-            display: block;
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 42px;
+            padding: 0 12px;
             font-size: 12px;
-            color: var(--text-secondary);
-            padding: 6px 8px;
+            color: var(--sidebar-text);
             border: none;
             background: none;
             width: 100%;
             text-align: left;
             cursor: pointer;
+            transition: color 0.15s, background 0.15s;
+        }
+        .outline-item[hidden] { display: none; }
+        .outline-item:hover { color: var(--primary); background: var(--sidebar-hover); }
+        .outline-item.active { color: var(--primary); background: var(--sidebar-active); }
+        .outline-item.active::before { content: ''; position: absolute; top: 0; bottom: 0; width: 3px; background: var(--primary); }
+        .outline-sidebar.sidebar-left .outline-item.active::before { left: 0; }
+        .outline-sidebar.sidebar-right .outline-item.active::before { right: 0; }
+        .outline-icon { width: 24px; flex: 0 0 24px; text-align: center; font-size: 16px; }
+        .outline-sidebar.collapsed { width: 48px; }
+        .outline-sidebar.collapsed .outline-title, .outline-sidebar.collapsed .outline-label, .outline-sidebar.collapsed .outline-position { display: none; }
+        .outline-sidebar.collapsed .outline-header { justify-content: center; padding: 0; }
+        .outline-sidebar.collapsed .outline-item { justify-content: center; padding: 0; }
+        .sidebar-menu-button, .sidebar-backdrop { display: none; }
+        .sidebar-menu-button {
+            width: 42px;
+            height: 42px;
+            padding: 0;
+            border: 1px solid var(--sidebar-border);
             border-radius: 6px;
-            transition: color 0.2s, background 0.2s;
-        }
-        .outline-item:hover { color: var(--primary); background: var(--bg-main); }
-        .outline-fab {
-            position: fixed;
-            right: 14px;
-            top: 110px;
-            z-index: 200;
-            width: 34px;
-            height: 34px;
-            border-radius: 50%;
-            background: var(--primary);
-            color: #fff;
-            border: none;
+            background: var(--sidebar-bg);
+            color: var(--sidebar-text);
+            box-shadow: 0 4px 14px rgba(0,0,0,0.16);
+            font-size: 22px;
+            line-height: 1;
             cursor: pointer;
-            font-size: 15px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            display: none;
-            align-items: center;
-            justify-content: center;
         }
+        .sidebar-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 590;
+            border: 0;
+            background: rgba(0,0,0,0.42);
+        }
+        body.sidebar-right.sidebar-collapsed { padding-right: 68px; padding-left: 20px; }
+        body.sidebar-right:not(.sidebar-collapsed) { padding-right: 196px; padding-left: 20px; }
+        body.sidebar-left.sidebar-collapsed { padding-left: 68px; padding-right: 20px; }
+        body.sidebar-left:not(.sidebar-collapsed) { padding-left: 196px; padding-right: 20px; }
         @media (max-width: 1250px) {
-            .outline-sidebar, .outline-fab { display: none !important; }
+            body.sidebar-left.sidebar-collapsed,
+            body.sidebar-left:not(.sidebar-collapsed),
+            body.sidebar-right.sidebar-collapsed,
+            body.sidebar-right:not(.sidebar-collapsed) { padding: 20px; }
+            .header {
+                position: sticky;
+                top: 0;
+                z-index: 550;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                min-height: 58px;
+                margin-bottom: 15px;
+                padding: 8px 12px;
+                border: 1px solid var(--border-color);
+                border-radius: 8px;
+                background: var(--bg-card);
+                box-shadow: 0 3px 12px rgba(0,0,0,0.1);
+                text-align: left;
+            }
+            .header h1 { order: 1; min-width: 0; flex: 1; margin: 0; font-size: 1.2rem; line-height: 1.25; }
+            .sidebar-menu-button {
+                position: static;
+                z-index: auto;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                flex: 0 0 42px;
+                order: 0;
+                box-shadow: none;
+            }
+            body.sidebar-right .sidebar-menu-button { order: 3; }
+            .query-activity.processing { top: 70px; }
+            .sidebar-backdrop.visible { display: block; }
+            .outline-sidebar, .outline-sidebar.collapsed {
+                display: block;
+                z-index: 600;
+                width: min(280px, 84vw);
+                transition: transform 0.22s ease, background 0.3s, color 0.3s;
+            }
+            .outline-sidebar.sidebar-left { transform: translateX(-105%); }
+            .outline-sidebar.sidebar-right { transform: translateX(105%); }
+            .outline-sidebar.mobile-open { transform: translateX(0); }
+            .outline-sidebar.collapsed .outline-title,
+            .outline-sidebar.collapsed .outline-label,
+            .outline-sidebar.collapsed .outline-position { display: initial; }
+            .outline-sidebar.collapsed .outline-header { justify-content: space-between; padding: 0 10px 0 16px; }
+            .outline-sidebar.collapsed .outline-item { justify-content: flex-start; padding: 0 12px; }
+            body.mobile-sidebar-open { overflow: hidden; }
+        }
+        @media (max-width: 700px) {
+            body.sidebar-left.sidebar-collapsed,
+            body.sidebar-left:not(.sidebar-collapsed),
+            body.sidebar-right.sidebar-collapsed,
+            body.sidebar-right:not(.sidebar-collapsed) { padding: 10px; }
+            .header {
+                gap: 8px;
+                min-height: 54px;
+                width: calc(100% + 20px);
+                margin: -10px -10px 10px;
+                padding: 7px 10px;
+                border-top: 0;
+                border-right: 0;
+                border-left: 0;
+                border-radius: 0 0 8px 8px;
+            }
+            .header h1 { display: flex; align-items: center; min-width: 0; margin: 0; font-size: 1.05rem; line-height: 1.25; }
+            .header-icon { margin-right: 6px; font-size: 1.2rem; }
+            .header-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .header-version { margin-left: 5px; white-space: nowrap; }
+            .sidebar-menu-button { width: 38px; height: 38px; flex-basis: 38px; }
+            .tabs { gap: 0; }
+            .tab { flex: 1 1 50%; padding: 11px 8px; text-align: center; }
+            .card { padding: 14px; border-radius: 8px; }
+            .config-grid { grid-template-columns: 1fr; }
+            .config-item { justify-content: space-between; }
+            .proxy-section, .proxy-url { align-items: stretch; flex-direction: column; gap: 8px; }
+            .proxy-url input { width: 100%; min-width: 0; }
+            .platform-buttons { width: 100%; }
+            .platform-btn { flex: 1 1 130px; padding: 8px 10px; }
+            .theme-label { display: none; }
+            .btn-group .btn { flex: 1 1 130px; }
+            .query-activity.processing { top: 72px; width: calc(100vw - 20px); }
+            .query-activity { align-items: flex-start; flex-wrap: wrap; }
+            .query-elapsed { margin-left: 34px; }
+            .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+            .stat-item { min-width: 0; padding: 9px 8px; }
+            .result-filter-field, .result-filter-field select { width: 100%; }
+            .result-filter-field { justify-content: space-between; }
+            .result-filter-count { width: 100%; margin-left: 0; }
+            .history-item { align-items: stretch; flex-direction: column; gap: 10px; }
+            .history-stats { justify-content: space-between; }
+            .history-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .history-actions .btn { padding-inline: 6px; }
+            .toast-container { top: 64px; right: 12px; left: 12px; }
+            .toast { width: 100%; }
         }
     </style>
 </head>
-<body>
+<body class="sidebar-right">
     <div class="container">
         <div class="header">
-            <h1>🌐 域名批量查询系统 v2.6</h1>
-            <p style="color: var(--text-secondary); font-size: 14px;">
-                <span class="platform-badge" id="currentPlatform">
-                    <span>🔍</span>
-                    <span id="platformName">WHOIS标准查询</span>
-                </span>
-            </p>
+            <button type="button" class="sidebar-menu-button" id="sidebarMenuButton" onclick="toggleMobileSidebar()"
+                    aria-label="打开页面大纲" aria-controls="outlineSidebar" aria-expanded="false" title="打开页面大纲">☰</button>
+            <h1><span class="header-icon">🌐</span><span class="header-name">域名批量查询</span><span class="header-version">v2.6</span></h1>
         </div>
         
         <!-- Tab切换 -->
@@ -652,7 +1016,7 @@
                     <div class="config-item"><label>限流(秒):</label><input type="number" id="cfgRateLimit" step="0.1" min="0.1" value="1.0"></div>
                     <div class="config-item"><label>重试:</label><input type="number" id="cfgRetries" min="1" max="10" value="3"></div>
                     <div class="config-item"><label>并发:</label><input type="number" id="cfgWorkers" min="1" max="10" value="5"></div>
-                    <div class="config-item"><label>超时:</label><input type="number" id="cfgTimeout" min="5" max="60" value="15"></div>
+                    <div class="config-item"><label>默认超时(秒):</label><input type="number" id="cfgTimeout" min="1" max="120" value="15" onchange="syncQueryTimeoutFromDefault()" title="新查询默认使用的单阶段超时时间"></div>
                     <div class="config-item"><label>单批上限:</label><input type="number" id="cfgMaxBatch" min="10" max="1000" value="500"></div>
                 </div>
                 
@@ -697,21 +1061,38 @@
             <!-- 输入区域 -->
             <div class="card" id="inputCard">
                 <h2 class="card-title">📋 输入域名</h2>
-                <textarea id="domains" placeholder="支持多种格式输入：
+                <div class="preset-bar">
+                    <span class="preset-label">演示预设</span>
+                    <button type="button" class="preset-btn" onclick="fillDomainPreset('popular')">知名网站</button>
+                    <button type="button" class="preset-btn" onclick="fillDomainPreset('mixed'); setQueryMode('quick')">混合演示（快速）</button>
+                    <button type="button" class="preset-btn" onclick="fillDomainPreset('urls')">URL 示例</button>
+                </div>
+                <div class="query-mode-bar" aria-label="查询模式">
+                    <span class="query-mode-label">查询模式</span>
+                    <div class="query-mode-buttons" role="group" aria-label="查询模式选择">
+                        <button type="button" class="query-mode-btn active" data-query-mode="unlimited" onclick="setQueryMode('unlimited')">不限流</button>
+                        <button type="button" class="query-mode-btn" data-query-mode="standard" onclick="setQueryMode('standard')">标准</button>
+                        <button type="button" class="query-mode-btn" data-query-mode="quick" onclick="setQueryMode('quick')">快速</button>
+                    </div>
+                    <label class="query-timeout-field" for="queryTimeout">本次超时
+                        <input type="number" id="queryTimeout" min="1" max="120" value="15" title="仅用于本次查询和随后重查，不修改默认配置">秒
+                    </label>
+                    <span class="query-mode-hint" id="queryModeHint">不添加主动请求间隔</span>
+                </div>
+                <div class="domain-editor">
+                    <div class="line-numbers" id="domainLineNumbers" aria-hidden="true">1</div>
+                    <textarea id="domains" wrap="off" spellcheck="false" oninput="updateDomainLineNumbers()" onscroll="syncDomainLineNumbers()" placeholder="支持多种格式输入：
 example.com
 www.example.com
 https://example.com
 https://www.example.com/path/to/page"></textarea>
+                </div>
                 
                 <div class="btn-group">
                     <button class="btn btn-primary" id="btnQuery" onclick="startQuery()">🔍 开始查询</button>
                     <button class="btn btn-warning" id="btnPause" onclick="togglePause()" style="display: none;">⏸ 暂停</button>
                     <button class="btn btn-danger" id="btnCancel" onclick="cancelTask()" style="display: none;">⏹ 取消</button>
                     <button class="btn btn-secondary" onclick="clearAll()">🗑 清空</button>
-                </div>
-                
-                <div class="progress-section" id="progressSection">
-                    <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width: 0%">0%</div></div>
                 </div>
                 
                 <div class="tips">
@@ -739,21 +1120,58 @@ https://www.example.com/path/to/page"></textarea>
                     📊 查询结果
                     <span id="progressText" style="margin-left: auto; font-size: 13px; color: var(--text-secondary); font-weight: normal;"></span>
                 </h2>
+
+                <div class="progress-section" id="progressSection">
+                    <div class="query-activity" id="queryActivity" role="status" aria-live="polite">
+                        <div class="query-spinner" aria-hidden="true"></div>
+                        <div class="query-activity-main">
+                            <div class="query-activity-title" id="queryActivityTitle">准备查询</div>
+                            <div class="query-activity-detail" id="queryActivityDetail">正在提交任务...</div>
+                        </div>
+                        <div class="query-elapsed" id="queryElapsed">00:00.0</div>
+                    </div>
+                    <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width: 0%">0%</div></div>
+                </div>
                 
                 <div class="stats">
                     <div class="stat-item"><div class="stat-value" id="statTotal">0</div><div class="stat-label">总计</div></div>
                     <div class="stat-item"><div class="stat-value" id="statSuccess">0</div><div class="stat-label">成功</div></div>
                     <div class="stat-item"><div class="stat-value" id="statFailed">0</div><div class="stat-label">失败</div></div>
+                    <div class="stat-item"><div class="stat-value" id="statTimeout">0</div><div class="stat-label">超时</div></div>
                     <div class="stat-item"><div class="stat-value" id="statNotRegistered">0</div><div class="stat-label">未注册</div></div>
                     <div class="stat-item"><div class="stat-value" id="statBlocked">0</div><div class="stat-label">未解析</div></div>
                     <div class="stat-item"><div class="stat-value" id="statNormal">0</div><div class="stat-label">正常</div></div>
                 </div>
+
+                <div class="result-filter-bar" aria-label="结果筛选">
+                    <span class="result-filter-title">表格筛选</span>
+                    <label class="result-filter-field" for="statusFilter">状态筛选
+                        <select id="statusFilter" onchange="applyResultFilters()">
+                            <option value="all">全部状态</option>
+                            <option value="success">成功</option>
+                            <option value="not_registered">未注册</option>
+                            <option value="timeout">超时</option>
+                            <option value="failed">失败</option>
+                            <option value="invalid">格式无效</option>
+                        </select>
+                    </label>
+                    <label class="result-filter-field" for="resolutionFilter">解析筛选
+                        <select id="resolutionFilter" onchange="applyResultFilters()">
+                            <option value="all">全部解析状态</option>
+                            <option value="resolved">正常</option>
+                            <option value="held">停止解析</option>
+                            <option value="unresolved">未解析</option>
+                            <option value="unknown">未知</option>
+                            <option value="not_applicable">不适用</option>
+                        </select>
+                    </label>
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="resetResultFilters()">重置筛选</button>
+                    <span class="result-filter-count" id="visibleResultCount">显示 0/0</span>
+                </div>
                 
                 <div class="export-bar">
-                    <button class="btn btn-sm btn-success" onclick="retrySelected()" id="btnRetrySel">🔄 重试选中</button>
-                    <button class="btn btn-sm btn-warning" onclick="retryFailed()" id="btnRetryFail">🔄 重试失败</button>
-                    <button class="btn btn-sm btn-secondary" onclick="selectAll()">☑ 全选</button>
-                    <button class="btn btn-sm btn-secondary" onclick="selectNone()">☐ 取消</button>
+                    <button class="btn btn-sm btn-success retry-action-btn" onclick="retrySelected()" id="btnRetrySel">🔄 重新查询选中</button>
+                    <button class="btn btn-sm btn-warning retry-action-btn" onclick="retryFailed()" id="btnRetryFail">🔄 重新查询失败</button>
                     <span style="font-size: 12px; color: var(--text-secondary);">已选 <span id="selectionCount">0</span> 项</span>
                     
                     <span style="margin-left: 15px;">格式:</span>
@@ -761,12 +1179,14 @@ https://www.example.com/path/to/page"></textarea>
                         <option value="csv" selected>CSV</option>
                         <option value="xlsx">Excel</option>
                     </select>
-                    <span>过滤:</span>
+                    <span>导出过滤:</span>
                     <select id="exportFilter">
                         <option value="all">全部</option>
                         <option value="success">成功</option>
                         <option value="normal">正常</option>
                         <option value="failed">失败</option>
+                        <option value="timeout">超时</option>
+                        <option value="not_registered">未注册</option>
                         <option value="blocked">未解析</option>
                     </select>
                     <button class="btn btn-sm btn-primary" onclick="exportSelected()">📥 导出选中</button>
@@ -781,6 +1201,8 @@ https://www.example.com/path/to/page"></textarea>
                                     <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()">
                                 </th>
                                 <th data-sort="domain" onclick="sortTable('domain')">域名<span class="sort-icon">⇅</span></th>
+                                <th data-sort="query_time" onclick="sortTable('query_time')">查询时间<span class="sort-icon">⇅</span></th>
+                                <th data-sort="query_duration_seconds" onclick="sortTable('query_duration_seconds')">查询耗时<span class="sort-icon">⇅</span></th>
                                 <th data-sort="status" onclick="sortTable('status')">状态<span class="sort-icon">⇅</span></th>
                                 <th data-sort="registrar" onclick="sortTable('registrar')">注册商<span class="sort-icon">⇅</span></th>
                                 <th data-sort="registration_date" onclick="sortTable('registration_date')">注册日期<span class="sort-icon">⇅</span></th>
@@ -812,19 +1234,33 @@ https://www.example.com/path/to/page"></textarea>
     
     <div class="toast-container" id="toastContainer"></div>
 
-    <!-- 侧边栏大纲（支持收起，状态保存在本地） -->
-    <aside class="outline-sidebar" id="outlineSidebar">
-        <div class="outline-header">
-            <span>📑 大纲</span>
-            <button class="outline-toggle" onclick="toggleSidebar(true)" title="收起大纲">«</button>
+    <button type="button" class="sidebar-backdrop" id="sidebarBackdrop" onclick="setMobileSidebarOpen(false)"
+            aria-label="关闭页面大纲" tabindex="-1"></button>
+
+    <div class="detail-modal hidden" id="detailModal" role="dialog" aria-modal="true" aria-labelledby="detailDialogTitle" onclick="if (event.target === this) closeResultDetails()">
+        <div class="detail-dialog">
+            <div class="detail-dialog-header">
+                <h2 class="detail-dialog-title" id="detailDialogTitle">域名详细结果</h2>
+                <button type="button" class="detail-close-btn" onclick="closeResultDetails()" title="关闭" aria-label="关闭详细结果">×</button>
+            </div>
+            <div class="detail-summary" id="detailSummary"></div>
+            <div class="detail-grid" id="detailGrid"></div>
         </div>
-        <button class="outline-item" onclick="scrollToSection('configCard')">⚙️ 查询配置</button>
-        <button class="outline-item" onclick="scrollToSection('inputCard')">📋 输入域名</button>
-        <button class="outline-item" onclick="scrollToSection('logCard')">📜 运行日志</button>
-        <button class="outline-item" onclick="scrollToSection('resultsCard')">📊 查询结果</button>
-        <button class="outline-item" onclick="switchTab('history')">📚 历史记录</button>
+    </div>
+
+    <!-- VS Code 风格侧边栏大纲（支持紧凑模式，状态保存在本地） -->
+    <aside class="outline-sidebar" id="outlineSidebar" aria-label="页面大纲">
+        <div class="outline-header">
+            <span class="outline-title">页面大纲</span>
+            <button class="outline-toggle outline-position" id="outlinePosition" onclick="toggleSidebarPosition()" title="停靠到左侧" aria-label="切换侧栏停靠位置">⇆</button>
+            <button class="outline-toggle" id="outlineToggle" onclick="toggleSidebar()" title="切换侧栏宽度" aria-label="切换侧栏宽度">‹</button>
+        </div>
+        <button class="outline-item active" data-section="configCard" onclick="scrollToSection('configCard')" title="查询配置"><span class="outline-icon">⚙</span><span class="outline-label">查询配置</span></button>
+        <button class="outline-item" data-section="inputCard" onclick="scrollToSection('inputCard')" title="输入域名"><span class="outline-icon">▤</span><span class="outline-label">输入域名</span></button>
+        <button class="outline-item" data-section="logCard" data-conditional="true" onclick="scrollToSection('logCard')" title="运行日志" hidden><span class="outline-icon">›_</span><span class="outline-label">运行日志</span></button>
+        <button class="outline-item" data-section="resultsCard" data-conditional="true" onclick="scrollToSection('resultsCard')" title="查询结果" hidden><span class="outline-icon">▦</span><span class="outline-label">查询结果</span></button>
+        <button class="outline-item" data-section="history" onclick="switchTab('history')" title="历史记录"><span class="outline-icon">◷</span><span class="outline-label">历史记录</span></button>
     </aside>
-    <button class="outline-fab" id="outlineFab" onclick="toggleSidebar(false)" title="打开大纲">☰</button>
     
     <script>
         let currentTaskId = null;
@@ -832,11 +1268,15 @@ https://www.example.com/path/to/page"></textarea>
         let isPaused = false;
         let currentResults = [];
         let selectedDomains = new Set();
-        let lastLogCount = 0;
+        let lastLogCursor = 0;
         let currentLogLevel = 'all';
         let currentTab = 'query';
         let currentPlatform = 'whois';
         let currentTheme = 'light';
+        let isTaskBusy = false;
+        let pollInFlight = false;
+        let currentOperation = 'query';
+        let currentQueryMode = 'unlimited';
         
         // 排序状态
         let sortState = { column: null, ascending: true };
@@ -850,6 +1290,64 @@ https://www.example.com/path/to/page"></textarea>
             rdap: { name: 'RDAP安全查询', icon: '🛡️', implemented: false,
                     desc: '基于 HTTPS 的注册数据访问协议（RFC 7480），返回结构化 JSON、更安全。暂未接入，当前自动使用 WHOIS 标准协议' }
         };
+
+        const domainPresets = {
+            popular: ['baidu.com', 'qq.com', 'github.com', 'microsoft.com', 'openai.com'],
+            mixed: ['www.baidu.com', 'cartutuoficina.com', 'handwerkszubehoer.com', 'docs.python.org', '2333lqbz.xyz'],
+            urls: ['https://www.qq.com/', 'https://github.com/openai', 'www.baidu.com', 'docs.python.org']
+        };
+
+        function updateDomainLineNumbers() {
+            const textarea = document.getElementById('domains');
+            const lineCount = textarea.value.split('\n').length;
+            document.getElementById('domainLineNumbers').textContent = Array.from(
+                { length: lineCount }, (_, index) => index + 1
+            ).join('\n');
+            syncDomainLineNumbers();
+        }
+
+        function syncDomainLineNumbers() {
+            document.getElementById('domainLineNumbers').scrollTop = document.getElementById('domains').scrollTop;
+        }
+
+        function fillDomainPreset(name) {
+            const preset = domainPresets[name];
+            if (!preset) return;
+            const textarea = document.getElementById('domains');
+            textarea.value = preset.join('\n');
+            updateDomainLineNumbers();
+            textarea.focus();
+            showToast(`已填充 ${preset.length} 个演示域名`, 'info');
+        }
+
+        function setQueryMode(mode) {
+            currentQueryMode = ['unlimited', 'standard', 'quick'].includes(mode) ? mode : 'unlimited';
+            document.querySelectorAll('.query-mode-btn').forEach(button => {
+                button.classList.toggle('active', button.dataset.queryMode === currentQueryMode);
+            });
+            const hint = document.getElementById('queryModeHint');
+            if (hint) {
+                const hints = {
+                    unlimited: '不添加主动请求间隔，仍受并发、超时和重试次数约束',
+                    standard: '按默认限流和重试等待策略查询',
+                    quick: '缩短 WHOIS 等待，适合演示与小批量排查',
+                };
+                hint.textContent = hints[currentQueryMode];
+            }
+        }
+
+        function queryTimeoutValue() {
+            const input = document.getElementById('queryTimeout');
+            const value = Math.max(1, Math.min(120, parseInt(input.value) || 15));
+            input.value = value;
+            return value;
+        }
+
+        function syncQueryTimeoutFromDefault() {
+            const value = Math.max(1, Math.min(120, parseInt(document.getElementById('cfgTimeout').value) || 15));
+            document.getElementById('cfgTimeout').value = value;
+            document.getElementById('queryTimeout').value = value;
+        }
         
         // Toast
         function showToast(message, type = 'success') {
@@ -911,7 +1409,6 @@ https://www.example.com/path/to/page"></textarea>
                 btn.classList.remove('active');
             });
             document.querySelector(`.platform-btn[data-platform="${platform}"]`).classList.add('active');
-            document.getElementById('platformName').textContent = platforms[platform].name;
             
             // 未接入的平台要明确提示，避免用户误以为使用了对应接口
             const hint = document.getElementById('platformHint');
@@ -945,7 +1442,12 @@ https://www.example.com/path/to/page"></textarea>
             });
             document.getElementById('tabQuery').classList.toggle('hidden', tab !== 'query');
             document.getElementById('tabHistory').classList.toggle('hidden', tab !== 'history');
-            if (tab === 'history') loadHistory();
+            if (tab === 'history') {
+                setOutlineActive('history');
+                loadHistory();
+            }
+            syncOutlineVisibility();
+            setMobileSidebarOpen(false);
         }
         
         // 表格排序
@@ -970,9 +1472,15 @@ https://www.example.com/path/to/page"></textarea>
                 let valB = b[column] || '';
                 
                 // 数字比较
-                if (column === 'expiration_date' || column === 'registration_date') {
+                if (column === 'expiration_date' || column === 'registration_date' || column === 'query_time') {
                     valA = valA ? new Date(valA) : new Date(0);
                     valB = valB ? new Date(valB) : new Date(0);
+                    return sortState.ascending ? valA - valB : valB - valA;
+                }
+
+                if (column === 'query_duration_seconds') {
+                    valA = Number.isFinite(Number(valA)) ? Number(valA) : -1;
+                    valB = Number.isFinite(Number(valB)) ? Number(valB) : -1;
                     return sortState.ascending ? valA - valB : valB - valA;
                 }
                 
@@ -1021,6 +1529,7 @@ https://www.example.com/path/to/page"></textarea>
                 document.getElementById('cfgRetries').value = config.max_retries;
                 document.getElementById('cfgWorkers').value = config.max_workers;
                 document.getElementById('cfgTimeout').value = config.timeout;
+                document.getElementById('queryTimeout').value = config.timeout;
                 document.getElementById('cfgMaxBatch').value = config.max_domains_per_batch;
                 document.getElementById('cfgProxyEnabled').checked = config.proxy_enabled;
                 document.getElementById('cfgProxyUrl').value = config.proxy_url || 'http://127.0.0.1:7897';
@@ -1048,18 +1557,21 @@ https://www.example.com/path/to/page"></textarea>
         async function startQuery() {
             const domainsText = document.getElementById('domains').value.trim();
             if (!domainsText) { showToast('请输入域名', 'error'); return; }
-            
-            document.getElementById('btnQuery').disabled = true;
-            document.getElementById('btnPause').style.display = 'inline-flex';
-            document.getElementById('btnCancel').style.display = 'inline-flex';
+
+            currentOperation = 'query';
+            setTaskBusy(true);
+            updateQueryActivity('processing', 'query', 0, 0, 0);
             document.getElementById('progressSection').classList.add('active');
             document.getElementById('logCard').style.display = 'block';
             document.getElementById('resultsCard').classList.remove('hidden');
             document.getElementById('resultsBody').innerHTML = '';
             document.getElementById('logContainer').innerHTML = '';
-            
+            syncOutlineVisibility();
+
             selectedDomains.clear();
             currentResults = [];
+            resetResultFilters();
+            lastLogCursor = 0;
             isPaused = false;
             sortState = { column: null, ascending: true };
             updatePauseButton();
@@ -1068,7 +1580,12 @@ https://www.example.com/path/to/page"></textarea>
                 const resp = await fetch('/api/query', { 
                     method: 'POST', 
                     headers: {'Content-Type':'application/json'}, 
-                    body: JSON.stringify({ domains: domainsText, platform: currentPlatform }) 
+                    body: JSON.stringify({
+                        domains: domainsText,
+                        platform: currentPlatform,
+                        query_mode: currentQueryMode,
+                        query_timeout: queryTimeoutValue(),
+                    })
                 });
                 const data = await resp.json();
                 if (resp.ok) {
@@ -1077,11 +1594,13 @@ https://www.example.com/path/to/page"></textarea>
                     startPolling();
                 } else {
                     showToast(data.error, 'error');
-                    resetButtons();
+                    updateQueryActivity('cancelled', 'query', 0, 0, 0, '任务提交失败');
+                    setTaskBusy(false);
                 }
             } catch (e) {
                 showToast('提交失败: ' + e.message, 'error');
-                resetButtons();
+                updateQueryActivity('cancelled', 'query', 0, 0, 0, '无法连接查询服务');
+                setTaskBusy(false);
             }
         }
         
@@ -1112,99 +1631,207 @@ https://www.example.com/path/to/page"></textarea>
             }
         }
         
+        function formatDuration(seconds) {
+            const value = Math.max(0, Number(seconds) || 0);
+            const minutes = Math.floor(value / 60);
+            const secs = value - minutes * 60;
+            return `${String(minutes).padStart(2, '0')}:${secs.toFixed(1).padStart(4, '0')}`;
+        }
+
+        function formatResultDuration(seconds) {
+            const value = Number(seconds);
+            return Number.isFinite(value) ? `${value.toFixed(2)} 秒` : '-';
+        }
+
+        function updateQueryActivity(state, operation, elapsed, completed, total, customTitle = '') {
+            const panel = document.getElementById('queryActivity');
+            panel.className = `query-activity ${state}`;
+            const action = operation === 'retry' ? '重新查询' : '查询';
+            let title = customTitle || `正在${action}`;
+            if (state === 'completed') title = customTitle || `${action}完成`;
+            if (isPaused && state === 'processing') title = `${action}已暂停`;
+            document.getElementById('queryActivityTitle').textContent = title;
+            document.getElementById('queryActivityDetail').textContent = total > 0
+                ? `${completed}/${total} 个域名已完成`
+                : '正在创建任务并分配查询线程';
+            document.getElementById('queryElapsed').textContent = formatDuration(elapsed);
+        }
+
+        function setTaskBusy(busy) {
+            isTaskBusy = busy;
+            document.body.setAttribute('aria-busy', busy ? 'true' : 'false');
+            document.getElementById('btnQuery').disabled = busy;
+            document.getElementById('btnPause').style.display = busy ? 'inline-flex' : 'none';
+            document.getElementById('btnCancel').style.display = busy ? 'inline-flex' : 'none';
+            updateSelectionInfo();
+        }
+
         // 轮询
         function startPolling() {
-            pollInterval = setInterval(async () => {
-                try {
-                    const [statusResp, resultsResp] = await Promise.all([
-                        fetch(`/api/status/${currentTaskId}`),
-                        fetch(`/api/results/${currentTaskId}?log_level=${currentLogLevel}`)
-                    ]);
-                    
-                    const status = await statusResp.json();
-                    const results = await resultsResp.json();
-                    
-                    document.getElementById('progressFill').style.width = status.progress + '%';
-                    document.getElementById('progressFill').textContent = status.progress + '%';
-                    document.getElementById('progressText').textContent = `已完成 ${status.completed}/${status.total}`;
-                    
-                    if (status.paused !== isPaused) {
-                        isPaused = status.paused;
-                        updatePauseButton();
-                    }
-                    
-                    if (results.logs && results.logs.length > lastLogCount) {
-                        updateLogs(results.logs.slice(lastLogCount));
-                        lastLogCount = results.logs.length;
-                    }
-                    
-                    if (results.refresh || results.results.length !== currentResults.length) {
-                        currentResults = results.results;
-                        renderResults();
-                    }
-                    
-                    if (status.status === 'completed') {
-                        stopPolling();
-                        showToast('查询完成！');
-                    }
-                } catch (e) { console.error('轮询错误', e); }
-            }, 500);
+            if (pollInterval) clearInterval(pollInterval);
+            pollTask();
+            pollInterval = setInterval(pollTask, 500);
+        }
+
+        async function pollTask(showCompletion = true) {
+            if (!currentTaskId || pollInFlight) return;
+            pollInFlight = true;
+            try {
+                const statusResp = await fetch(`/api/status/${currentTaskId}`);
+                if (!statusResp.ok) throw new Error('任务状态读取失败');
+                const status = await statusResp.json();
+                // 状态完成后再读取结果，避免并行请求拿到完成前的旧结果快照。
+                const resultsResp = await fetch(
+                    `/api/results/${currentTaskId}?log_level=${currentLogLevel}&log_after=${lastLogCursor}`
+                );
+                if (!resultsResp.ok) throw new Error('任务结果读取失败');
+                const results = await resultsResp.json();
+                if (status.operation !== 'completed') currentOperation = status.operation;
+
+                document.getElementById('progressFill').style.width = status.progress + '%';
+                document.getElementById('progressFill').textContent = status.progress + '%';
+                const prefix = currentOperation === 'retry' ? '重查' : '已完成';
+                document.getElementById('progressText').textContent = `${prefix} ${status.operation_completed}/${status.operation_total} · 耗时 ${formatDuration(status.elapsed_seconds)}`;
+
+                if (status.paused !== isPaused) {
+                    isPaused = status.paused;
+                    updatePauseButton();
+                }
+
+                if (results.logs && results.logs.length) updateLogs(results.logs);
+                lastLogCursor = results.log_cursor ?? lastLogCursor;
+
+                if (results.refresh || results.results.length !== currentResults.length) {
+                    currentResults = results.results;
+                    renderResults();
+                }
+
+                updateQueryActivity(
+                    status.status,
+                    currentOperation,
+                    status.elapsed_seconds,
+                    status.operation_completed,
+                    status.operation_total
+                );
+
+                if (status.status === 'completed') {
+                    stopPolling();
+                    if (showCompletion) showToast(`${currentOperation === 'retry' ? '重新查询' : '查询'}完成，耗时 ${formatDuration(status.duration_seconds)}`);
+                } else if (status.status === 'cancelled') {
+                    updateQueryActivity('cancelled', currentOperation, status.elapsed_seconds, status.operation_completed, status.operation_total, '任务已取消');
+                    stopPolling();
+                }
+            } catch (e) {
+                console.error('轮询错误', e);
+            } finally {
+                pollInFlight = false;
+            }
         }
         
         function stopPolling() {
             if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-            resetButtons();
+            setTaskBusy(false);
         }
         
         // 日志
         function changeLogLevel() {
             currentLogLevel = document.getElementById('logLevelFilter').value;
-            lastLogCount = 0;
+            lastLogCursor = 0;
             document.getElementById('logContainer').innerHTML = '';
+            pollTask(false);
         }
         
         function updateLogs(logs) {
             const container = document.getElementById('logContainer');
             logs.forEach(log => {
                 const line = document.createElement('div');
-                line.className = 'log-line';
-                const msgClass = log.level === 'error' ? 'log-error' : (log.level === 'warn' ? 'log-warn' : 'log-info');
-                line.innerHTML = `<span class="log-time">[${log.time}]</span><span class="${msgClass}">${escapeHtml(log.message)}</span>`;
+                const level = log.level === 'error' ? 'error' : (log.level === 'warn' ? 'warn' : 'info');
+                const levelText = level === 'error' ? '错误' : (level === 'warn' ? '警告' : '信息');
+                line.className = `log-line log-${level}`;
+                line.innerHTML = `<span class="log-time">${log.time}</span><span class="log-level">${levelText}</span><span class="log-message">${escapeHtml(log.message)}</span>`;
                 container.appendChild(line);
             });
             container.scrollTop = container.scrollHeight;
+        }
+
+        function isHeldResult(result) {
+            return Boolean(result.hold_status || (result.block_reason || '').includes('停止解析（域名被封）'));
+        }
+
+        function resolutionFilterValue(result) {
+            if (result.status === 'not_registered' || result.status === 'invalid') return 'not_applicable';
+            if (result.resolved === true) return 'resolved';
+            if (result.resolved === false) return isHeldResult(result) ? 'held' : 'unresolved';
+            return 'unknown';
+        }
+
+        function getFilteredResults() {
+            const statusFilter = document.getElementById('statusFilter')?.value || 'all';
+            const resolutionFilter = document.getElementById('resolutionFilter')?.value || 'all';
+            return currentResults.filter(result =>
+                (statusFilter === 'all' || result.status === statusFilter) &&
+                (resolutionFilter === 'all' || resolutionFilterValue(result) === resolutionFilter)
+            );
+        }
+
+        function applyResultFilters() {
+            renderResults();
+        }
+
+        function resetResultFilters() {
+            const statusFilter = document.getElementById('statusFilter');
+            const resolutionFilter = document.getElementById('resolutionFilter');
+            if (statusFilter) statusFilter.value = 'all';
+            if (resolutionFilter) resolutionFilter.value = 'all';
+            renderResults();
         }
         
         // 渲染结果表格
         function renderResults() {
             const tbody = document.getElementById('resultsBody');
             tbody.innerHTML = '';
+            const visibleResults = getFilteredResults();
             
-            currentResults.forEach(r => {
+            visibleResults.forEach(r => {
                 const tr = document.createElement('tr');
                 tr.dataset.domain = r.domain;
                 
+                const failure = resultFailureReason(r);
                 let statusBadge = r.status === 'success' ? '<span class="badge badge-success">✓ 成功</span>' :
                                   r.status === 'not_registered' ? '<span class="badge badge-invalid">未注册</span>' :
-                                  r.status === 'failed' ? '<span class="badge badge-failed">✗ 失败</span>' :
+                                  r.status === 'timeout' ? '<span class="badge badge-timeout">⏱ 超时</span>' :
+                                  r.status === 'failed' ? `<span class="badge badge-failed">✗ ${escapeHtml(failure)}</span>` :
                                   '<span class="badge badge-invalid">无效</span>';
+                const whoisStatus = r.whois_status
+                    ? `<small class="whois-status" title="WHOIS 原始状态：${escapeHtml(r.whois_status)}">${escapeHtml(r.whois_status)}</small>`
+                    : '';
+                statusBadge += whoisStatus;
                 
                 let resolvedBadge = '';
                 if (r.resolved === true) {
                     resolvedBadge = '<span class="badge badge-resolved">正常</span>';
                 } else if (r.resolved === false) {
-                    resolvedBadge = '<span class="badge badge-blocked">未解析</span>';
+                    const held = isHeldResult(r);
+                    resolvedBadge = held
+                        ? '<span class="badge badge-blocked">停止解析（域名被封）</span>'
+                        : '<span class="badge badge-blocked">未解析</span>';
                     if (r.block_reason) resolvedBadge += `<br><small class="error-text" title="${escapeHtml(r.block_reason)}">${escapeHtml(r.block_reason)}</small>`;
-                } else if (r.block_reason) {
-                    // resolved === null：查询超时等不确定状态，展示真实原因
-                    resolvedBadge = `<span class="badge badge-invalid">未知</span><br><small class="error-text" title="${escapeHtml(r.block_reason)}">${escapeHtml(r.block_reason)}</small>`;
+                } else if (r.status === 'not_registered' || r.status === 'invalid') {
+                    resolvedBadge = '<span class="badge badge-invalid">不适用</span>';
+                } else {
+                    // resolved === null：WHOIS/DNS 超时等不确定状态，展示真实原因
+                    resolvedBadge = '<span class="badge badge-invalid">未知</span>';
+                    const reason = r.block_reason || r.error;
+                    if (reason) resolvedBadge += `<br><small class="error-text" title="${escapeHtml(reason)}">${escapeHtml(reason)}</small>`;
                 }
                 
                 const checked = selectedDomains.has(r.domain) ? 'checked' : '';
                 
                 tr.innerHTML = `
                     <td class="checkbox-cell"><input type="checkbox" ${checked} onchange="toggleSelect('${escapeHtml(r.domain)}')"></td>
-                    <td><span class="domain-cell" onclick="retrySingle('${escapeHtml(r.domain)}')" title="点击重新查询">${escapeHtml(r.domain)}</span><span class="retry-icon">↻</span></td>
+                    <td><span class="domain-cell-wrap"><a class="domain-cell" href="https://${escapeHtml(r.domain)}" target="_blank" rel="noopener noreferrer" title="打开网站">${escapeHtml(r.domain)}</a><button type="button" class="retry-domain-btn" onclick="retrySingle('${escapeHtml(r.domain)}')" title="重新查询此域名" aria-label="重新查询此域名">↻ 重查</button><button type="button" class="detail-result-btn" onclick="showResultDetails('${escapeHtml(r.domain)}')" title="查看详细结果" aria-label="查看 ${escapeHtml(r.domain)} 的详细结果">详细结果</button><button type="button" class="copy-domain-btn" onclick="copyDomain(this, '${escapeHtml(r.domain)}')" title="复制域名" aria-label="复制域名 ${escapeHtml(r.domain)}">⧉</button></span></td>
+                    <td class="query-time-cell">${escapeHtml(r.query_time || '-')}</td>
+                    <td class="query-time-cell">${formatResultDuration(r.query_duration_seconds)}</td>
                     <td>${statusBadge}</td>
                     <td>${escapeHtml(r.registrar || '-')}</td>
                     <td>${r.registration_date || '-'}</td>
@@ -1218,6 +1845,8 @@ https://www.example.com/path/to/page"></textarea>
             });
             
             updateStats(currentResults);
+            const visibleCount = document.getElementById('visibleResultCount');
+            if (visibleCount) visibleCount.textContent = `显示 ${visibleResults.length}/${currentResults.length}`;
             updateSelectionInfo();
         }
         
@@ -1226,11 +1855,145 @@ https://www.example.com/path/to/page"></textarea>
             currentResults = results;
             renderResults();
         }
+
+        function fallbackCopyText(text) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                return document.execCommand('copy');
+            } catch (e) {
+                return false;
+            } finally {
+                textarea.remove();
+            }
+        }
+
+        async function copyDomain(button, domain) {
+            let copied = false;
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(domain);
+                    copied = true;
+                } else {
+                    copied = fallbackCopyText(domain);
+                }
+            } catch (e) {
+                copied = fallbackCopyText(domain);
+            }
+
+            if (!copied) {
+                showToast('复制失败，请手动复制域名', 'error');
+                return;
+            }
+
+            button.textContent = '✓';
+            button.classList.add('copied');
+            showToast(`已复制域名: ${domain}`);
+            setTimeout(() => {
+                button.textContent = '⧉';
+                button.classList.remove('copied');
+            }, 1200);
+        }
+
+        function detailValue(value) {
+            if (Array.isArray(value)) value = value.join(', ');
+            if (value === null || value === undefined || value === '') return '-';
+            return String(value);
+        }
+
+        function resultStatusText(result) {
+            if (result.status === 'success') return '查询成功';
+            if (result.status === 'not_registered') return '未注册';
+            if (result.status === 'timeout') return '查询超时';
+            if (result.status === 'failed') return `查询失败 · ${resultFailureReason(result)}`;
+            return '格式无效';
+        }
+
+        function resultFailureReason(result) {
+            if (result.status === 'timeout') return 'WHOIS 超时';
+            const error = String(result.error || '').toLowerCase();
+            if (error.includes('配额') || error.includes('quota') || error.includes('rate limit')) return '配额限制';
+            if (error.includes('网络解析') || error.includes('getaddrinfo') || error.includes('name resolution')) return '网络解析失败';
+            if (error.includes('连接') || error.includes('connection') || error.includes('network')) return '网络连接失败';
+            if (error.includes('未返回有效数据') || error.includes('空响应')) return 'WHOIS 空响应';
+            if (error.includes('解析错误')) return 'WHOIS 解析失败';
+            if (error.includes('内部处理异常')) return '内部处理异常';
+            return '其他错误';
+        }
+
+        function resultResolutionText(result) {
+            if (result.status === 'not_registered' || result.status === 'invalid') return '不适用';
+            if (result.resolved === true) return '正常解析';
+            if (result.resolved === false) {
+                return isHeldResult(result)
+                    ? '停止解析（域名被封）' : '未解析';
+            }
+            return '未知';
+        }
+
+        function resultJudgement(result) {
+            if (result.status === 'not_registered') return 'WHOIS 返回明确的未找到信号，系统据此判定为未注册。';
+            if (result.status === 'timeout') return 'WHOIS 在设定的超时时间内没有完成，当前不能确认域名是否注册。';
+            if (result.status === 'failed') {
+                return `查询失败类型：${resultFailureReason(result)}。这不是域名未注册或被封的结论，请结合原始错误判断。`;
+            }
+            if (result.status !== 'success') return '查询未完成或域名格式无效，请结合错误信息和运行日志判断。';
+            if (result.hold_status) return 'WHOIS 含有 Hold 状态，域名可能被注册商或注册局暂停解析。';
+            if (result.resolved === true) return 'WHOIS 有注册证据且 DNS 存在 A 记录。';
+            if (result.resolved === false) return 'WHOIS 有注册证据，但当前 DNS 未解析；请结合下方完整原因判断。';
+            return 'WHOIS 有注册证据，但 DNS 状态未知，建议结合日志或再次查询。';
+        }
+
+        function showResultDetails(domain) {
+            const result = currentResults.find(item => item.domain === domain);
+            if (!result) {
+                showToast('找不到该域名的结果', 'error');
+                return;
+            }
+            document.getElementById('detailDialogTitle').textContent = `${result.domain} · 详细结果`;
+            document.getElementById('detailSummary').textContent = resultJudgement(result);
+            const fields = [
+                ['查询状态', resultStatusText(result)],
+                ['解析结果', resultResolutionText(result)],
+                ['WHOIS 原始状态', result.whois_status],
+                ['停止解析状态', result.hold_status],
+                ['注册商', result.registrar],
+                ['注册日期', result.registration_date],
+                ['过期日期', result.expiration_date],
+                ['更新时间', result.updated_date],
+                ['DNS 服务器', result.name_servers],
+                ['DNSSEC', result.dnssec],
+                ['DNS 记录', result.dns_records],
+                ['查询时间', result.query_time],
+                ['查询耗时', formatResultDuration(result.query_duration_seconds)],
+                ['解析异常原因', result.block_reason],
+                ['错误备注', result.error],
+                ['接口原始返回', result.raw_response],
+            ];
+            document.getElementById('detailGrid').innerHTML = fields.map(([label, value]) =>
+                `<div class="detail-item${['解析异常原因', '错误备注', '接口原始返回'].includes(label) ? ' full' : ''}">` +
+                `<span class="detail-label">${escapeHtml(label)}</span>` +
+                `<span class="detail-value">${escapeHtml(detailValue(value))}</span></div>`
+            ).join('');
+            document.getElementById('detailModal').classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+            document.querySelector('.detail-close-btn').focus();
+        }
+
+        function closeResultDetails() {
+            document.getElementById('detailModal').classList.add('hidden');
+            document.body.style.overflow = '';
+        }
         
         function updateStats(results) {
             const total = results.length;
             const success = results.filter(r => r.status === 'success').length;
-            const failed = total - success;
+            const failed = results.filter(r => r.status === 'failed' || r.status === 'invalid').length;
+            const timeout = results.filter(r => r.status === 'timeout').length;
             const notRegistered = results.filter(r => r.status === 'not_registered').length;
             const blocked = results.filter(r => r.resolved === false).length;
             const normal = results.filter(r => r.status === 'success' && r.resolved !== false).length;
@@ -1238,10 +2001,12 @@ https://www.example.com/path/to/page"></textarea>
             document.getElementById('statTotal').textContent = total;
             document.getElementById('statSuccess').textContent = success;
             document.getElementById('statFailed').textContent = failed;
+            document.getElementById('statTimeout').textContent = timeout;
             document.getElementById('statNotRegistered').textContent = notRegistered;
             document.getElementById('statBlocked').textContent = blocked;
             document.getElementById('statNormal').textContent = normal;
-            document.getElementById('btnRetryFail').disabled = failed === 0;
+            const retryable = results.filter(r => ['failed', 'timeout', 'invalid'].includes(r.status)).length;
+            document.getElementById('btnRetryFail').disabled = retryable === 0;
         }
         
         function toggleSelect(domain) {
@@ -1269,27 +2034,66 @@ https://www.example.com/path/to/page"></textarea>
         
         function updateSelectionInfo() {
             document.getElementById('selectionCount').textContent = selectedDomains.size;
-            document.getElementById('btnRetrySel').disabled = selectedDomains.size === 0;
+            document.getElementById('btnRetrySel').disabled = isTaskBusy || selectedDomains.size === 0;
+            document.getElementById('btnRetryFail').disabled = isTaskBusy;
         }
-        
+
+        async function beginRetry(url, options = {}) {
+            if (isTaskBusy) return;
+            currentOperation = 'retry';
+            setTaskBusy(true);
+            document.getElementById('progressSection').classList.add('active');
+            document.getElementById('logCard').style.display = 'block';
+            syncOutlineVisibility();
+            updateQueryActivity('processing', 'retry', 0, 0, 0);
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('progressFill').textContent = '0%';
+
+            try {
+                const resp = await fetch(url, options);
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data.error || '重新查询提交失败');
+                showToast(data.message, 'info');
+                if (data.started) {
+                    startPolling();
+                } else {
+                    updateQueryActivity('completed', 'retry', 0, 0, 0, data.message);
+                    setTaskBusy(false);
+                }
+            } catch (e) {
+                updateQueryActivity('cancelled', 'retry', 0, 0, 0, '重新查询提交失败');
+                setTaskBusy(false);
+                showToast(e.message, 'error');
+            }
+        }
+
         // 重试
         async function retrySingle(domain) {
             if (!currentTaskId) return;
-            await fetch(`/api/retry/${currentTaskId}`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ domains: [domain] }) });
-            showToast(`正在重新查询: ${domain}`, 'info');
+            await beginRetry(`/api/retry/${currentTaskId}`, {
+                method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
+                    domains: [domain], query_mode: currentQueryMode, query_timeout: queryTimeoutValue()
+                })
+            });
         }
         
         async function retrySelected() {
             if (!currentTaskId || selectedDomains.size === 0) return;
-            await fetch(`/api/retry/${currentTaskId}`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ domains: Array.from(selectedDomains) }) });
-            showToast(`正在重试 ${selectedDomains.size} 个域名`, 'info');
+            await beginRetry(`/api/retry/${currentTaskId}`, {
+                method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
+                    domains: Array.from(selectedDomains), query_mode: currentQueryMode,
+                    query_timeout: queryTimeoutValue()
+                })
+            });
         }
         
         async function retryFailed() {
             if (!currentTaskId) return;
-            const resp = await fetch(`/api/retry-failed/${currentTaskId}`, { method: 'POST' });
-            const data = await resp.json();
-            showToast(data.message, 'info');
+            await beginRetry(`/api/retry-failed/${currentTaskId}`, {
+                method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
+                    query_mode: currentQueryMode, query_timeout: queryTimeoutValue()
+                })
+            });
         }
         
         // 导出
@@ -1310,28 +2114,27 @@ https://www.example.com/path/to/page"></textarea>
         async function cancelTask() {
             if (!currentTaskId) return;
             await fetch(`/api/cancel/${currentTaskId}`, { method: 'POST' });
+            updateQueryActivity('cancelled', currentOperation, 0, 0, 0, '任务已取消');
             stopPolling();
             showToast('任务已取消');
         }
         
-        function resetButtons() {
-            document.getElementById('btnQuery').disabled = false;
-            document.getElementById('btnPause').style.display = 'none';
-            document.getElementById('btnCancel').style.display = 'none';
-        }
-        
         function clearAll() {
             document.getElementById('domains').value = '';
+            updateDomainLineNumbers();
             document.getElementById('resultsBody').innerHTML = '';
             document.getElementById('resultsCard').classList.add('hidden');
             document.getElementById('progressSection').classList.remove('active');
             document.getElementById('logCard').style.display = 'none';
+            syncOutlineVisibility();
             document.getElementById('progressFill').style.width = '0%';
             currentTaskId = null;
             currentResults = [];
+            resetResultFilters();
             selectedDomains.clear();
             isPaused = false;
-            lastLogCount = 0;
+            lastLogCursor = 0;
+            currentOperation = 'query';
             sortState = { column: null, ascending: true };
             document.querySelectorAll('th').forEach(th => { th.classList.remove('sorted'); th.querySelector('.sort-icon').textContent = '⇅'; });
             stopPolling();
@@ -1387,20 +2190,24 @@ https://www.example.com/path/to/page"></textarea>
                 
                 const results = data.results.map(r => ({
                     domain: r.domain, status: r.status, registrar: r.registrar,
+                    whois_status: r.whois_status, hold_status: r.hold_status,
                     registration_date: r.registration_date, expiration_date: r.expiration_date,
                     updated_date: r.updated_date, name_servers: r.name_servers, dnssec: r.dnssec,
                     resolved: r.resolved === 1 ? true : (r.resolved === 0 ? false : null),
                     block_reason: r.block_reason,
                     dns_records: r.dns_records ? r.dns_records.split(',') : [],
-                    error: r.error
+                    error: r.error, raw_response: r.raw_response, query_time: r.query_time,
+                    query_duration_seconds: r.query_duration_seconds
                 }));
                 
                 // 加载历史结果到查询页表格
                 currentTaskId = taskId;
                 currentResults = results;
                 selectedDomains.clear();
+                resetResultFilters();
                 renderResults();
                 document.getElementById('resultsCard').classList.remove('hidden');
+                syncOutlineVisibility();
                 switchTab('query');
                 showToast(`已加载历史记录（${results.length} 条结果）`, 'info');
                 document.getElementById('resultsCard').scrollIntoView({ behavior: 'smooth' });
@@ -1436,29 +2243,116 @@ https://www.example.com/path/to/page"></textarea>
             return div.innerHTML;
         }
         
-        // 侧边栏大纲
-        function toggleSidebar(collapse) {
-            document.getElementById('outlineSidebar').classList.toggle('hidden', collapse);
-            document.getElementById('outlineFab').style.display = collapse ? 'flex' : 'none';
-            localStorage.setItem('domainCheckerSidebarCollapsed', collapse ? '1' : '0');
+        // VS Code 风格侧边栏大纲
+        function setSidebarCollapsed(collapsed) {
+            document.getElementById('outlineSidebar').classList.toggle('collapsed', collapsed);
+            document.body.classList.toggle('sidebar-collapsed', collapsed);
+            document.getElementById('outlineToggle').textContent = collapsed ? '›' : '‹';
+            localStorage.setItem('domainCheckerSidebarCollapsed', collapsed ? '1' : '0');
+        }
+
+        function setSidebarPosition(position) {
+            const side = position === 'left' ? 'left' : 'right';
+            const sidebar = document.getElementById('outlineSidebar');
+            sidebar.classList.toggle('sidebar-left', side === 'left');
+            sidebar.classList.toggle('sidebar-right', side === 'right');
+            document.body.classList.toggle('sidebar-left', side === 'left');
+            document.body.classList.toggle('sidebar-right', side === 'right');
+            const positionButton = document.getElementById('outlinePosition');
+            positionButton.title = side === 'left' ? '停靠到右侧' : '停靠到左侧';
+            localStorage.setItem('domainCheckerSidebarPosition', side);
+        }
+
+        function toggleSidebarPosition() {
+            const sidebar = document.getElementById('outlineSidebar');
+            setSidebarPosition(sidebar.classList.contains('sidebar-left') ? 'right' : 'left');
+        }
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('outlineSidebar');
+            if (window.matchMedia('(max-width: 1250px)').matches) {
+                setMobileSidebarOpen(false);
+                return;
+            }
+            setSidebarCollapsed(!sidebar.classList.contains('collapsed'));
+        }
+
+        function setMobileSidebarOpen(open) {
+            const sidebar = document.getElementById('outlineSidebar');
+            const menuButton = document.getElementById('sidebarMenuButton');
+            const backdrop = document.getElementById('sidebarBackdrop');
+            const mobile = window.matchMedia('(max-width: 1250px)').matches;
+            const visible = Boolean(open && mobile);
+            sidebar.classList.toggle('mobile-open', visible);
+            backdrop.classList.toggle('visible', visible);
+            document.body.classList.toggle('mobile-sidebar-open', visible);
+            menuButton.setAttribute('aria-expanded', visible ? 'true' : 'false');
+            menuButton.setAttribute('aria-label', visible ? '关闭页面大纲' : '打开页面大纲');
+            menuButton.title = visible ? '关闭页面大纲' : '打开页面大纲';
+        }
+
+        function toggleMobileSidebar() {
+            const sidebar = document.getElementById('outlineSidebar');
+            setMobileSidebarOpen(!sidebar.classList.contains('mobile-open'));
+        }
+
+        function setOutlineActive(section) {
+            document.querySelectorAll('.outline-item').forEach(item => {
+                item.classList.toggle('active', item.dataset.section === section);
+            });
+        }
+
+        function syncOutlineVisibility() {
+            document.querySelectorAll('.outline-item[data-conditional="true"]').forEach(item => {
+                const section = document.getElementById(item.dataset.section);
+                const available = currentTab === 'query' && section && getComputedStyle(section).display !== 'none'
+                    && !section.classList.contains('hidden');
+                item.hidden = !available;
+                if (!available && item.classList.contains('active')) setOutlineActive('inputCard');
+            });
         }
         
         function scrollToSection(id) {
             const el = document.getElementById(id);
             if (!el) return;
             if (currentTab !== 'query') switchTab('query');
+            setOutlineActive(id);
             el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            setMobileSidebarOpen(false);
         }
         
         function initSidebar() {
             const collapsed = localStorage.getItem('domainCheckerSidebarCollapsed') === '1';
-            toggleSidebar(collapsed);
+            const position = localStorage.getItem('domainCheckerSidebarPosition') || 'right';
+            setSidebarCollapsed(collapsed);
+            setSidebarPosition(position);
+            syncOutlineVisibility();
+            const observer = new IntersectionObserver(entries => {
+                const visible = entries.filter(entry => entry.isIntersecting)
+                    .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+                if (visible && currentTab === 'query') setOutlineActive(visible.target.id);
+            }, { rootMargin: '-15% 0px -65% 0px', threshold: [0, 0.2, 0.5] });
+            ['configCard', 'inputCard', 'logCard', 'resultsCard'].forEach(id => {
+                const section = document.getElementById(id);
+                if (section) observer.observe(section);
+            });
+            window.matchMedia('(max-width: 1250px)').addEventListener('change', () => setMobileSidebarOpen(false));
         }
+
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && !document.getElementById('detailModal').classList.contains('hidden')) {
+                closeResultDetails();
+            } else if (event.key === 'Escape') {
+                setMobileSidebarOpen(false);
+            }
+        });
         
         // 初始化
         loadTheme();
         loadConfig();
         renderPlatformInfo();
+        updateDomainLineNumbers();
+        setQueryMode('unlimited');
         initSidebar();
     </script>
 </body>

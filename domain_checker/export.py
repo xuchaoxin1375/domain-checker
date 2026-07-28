@@ -15,7 +15,7 @@ EXPORT_DIR = tempfile.gettempdir()
 EXPORT_HEADERS = ['域名', '状态', '注册商', '注册日期', '过期日期', '更新时间',
                   'DNS服务器', 'DNSSEC', '解析状态', 'DNS记录', '解析异常原因', '错误备注']
 
-STATUS_MAP = {'success': '查询成功', 'failed': '查询失败',
+STATUS_MAP = {'success': '查询成功', 'failed': '查询失败', 'timeout': '查询超时',
               'invalid': '格式无效', 'not_registered': '域名未被注册'}
 RESOLVED_MAP = {True: '正常解析', False: '未解析', None: '未知'}
 
@@ -29,7 +29,11 @@ def create_export_file(results: list, format: str = 'csv', filter_type: str = 'a
         filtered = [r for r in results
                     if r['status'] == 'success' and r.get('resolved') is not False]
     elif filter_type == 'failed':
-        filtered = [r for r in results if r['status'] != 'success']
+        filtered = [r for r in results if r['status'] == 'failed']
+    elif filter_type == 'timeout':
+        filtered = [r for r in results if r['status'] == 'timeout']
+    elif filter_type == 'not_registered':
+        filtered = [r for r in results if r['status'] == 'not_registered']
     elif filter_type == 'blocked':
         filtered = [r for r in results if r.get('resolved') is False]
 

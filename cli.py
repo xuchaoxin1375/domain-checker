@@ -96,6 +96,8 @@ def main():
             print(f"✓ 成功 | 过期: {exp}")
         elif result['status'] == 'not_registered':
             print("⊘ 未注册")
+        elif result['status'] == 'timeout':
+            print(f"⌛ 超时 | {result['error']}")
         else:
             print(f"✗ 失败 | {result['error']}")
 
@@ -108,10 +110,11 @@ def main():
     print(f"{'='*60}")
 
     success = sum(1 for r in results if r['status'] == 'success')
-    failed = len(results) - success
+    timeout = sum(1 for r in results if r['status'] == 'timeout')
+    failed = sum(1 for r in results if r['status'] in {'failed', 'invalid'})
     blocked = sum(1 for r in results if r['resolved'] is False)
 
-    print(f"总计: {len(results)} | 成功: {success} | 失败: {failed} | 未解析: {blocked}")
+    print(f"总计: {len(results)} | 成功: {success} | 失败: {failed} | 超时: {timeout} | 未解析: {blocked}")
     print(f"耗时: {elapsed:.1f}秒")
     print(f"平均: {elapsed/len(results):.2f}秒/域名")
     print()
