@@ -530,7 +530,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌐 域名批量查询系统 v2.3</h1>
+            <h1>🌐 域名批量查询系统 v2.5</h1>
             <p style="color: var(--text-secondary); font-size: 14px;">
                 <span class="platform-badge" id="currentPlatform">
                     <span>🔍</span>
@@ -541,8 +541,8 @@
         
         <!-- Tab切换 -->
         <div class="tabs">
-            <button class="tab active" onclick="switchTab('query')">📝 查询</button>
-            <button class="tab" onclick="switchTab('history')">📚 历史记录</button>
+            <button class="tab active" data-tab="query" onclick="switchTab('query')">📝 查询</button>
+            <button class="tab" data-tab="history" onclick="switchTab('history')">📚 历史记录</button>
         </div>
         
         <!-- 查询页面 -->
@@ -584,12 +584,22 @@
                 <div class="proxy-section">
                     <div class="proxy-toggle">
                         <input type="checkbox" id="cfgProxyEnabled">
-                        <label>启用代理</label>
+                        <label for="cfgProxyEnabled">启用代理</label>
                     </div>
                     <div class="proxy-url">
                         <label>代理地址:</label>
                         <input type="text" id="cfgProxyUrl" value="http://127.0.0.1:7897" placeholder="http://127.0.0.1:7897">
                     </div>
+                </div>
+                
+                <!-- 局域网访问设置 -->
+                <div class="proxy-section">
+                    <div class="proxy-toggle">
+                        <input type="checkbox" id="cfgLanAccess">
+                        <label for="cfgLanAccess">允许局域网访问</label>
+                    </div>
+                    <span id="lanStatus" style="font-size: 12px; color: var(--text-secondary);"></span>
+                    <span style="font-size: 12px; color: var(--warning);">⚠️ 开启后同一局域网的设备可通过 http://本机IP:5000 访问本系统；此项修改需重启程序后生效</span>
                 </div>
                 
                 <button class="btn btn-secondary btn-sm" onclick="saveConfig()" style="margin-top: 12px;">💾 保存配置</button>
@@ -645,7 +655,7 @@ https://www.example.com/path/to/page"></textarea>
                     <div class="stat-item"><div class="stat-value" id="statTotal">0</div><div class="stat-label">总计</div></div>
                     <div class="stat-item"><div class="stat-value" id="statSuccess">0</div><div class="stat-label">成功</div></div>
                     <div class="stat-item"><div class="stat-value" id="statFailed">0</div><div class="stat-label">失败</div></div>
-                    <div class="stat-item"><div class="stat-value" id="statBlocked">0</div><div class="stat-label">已停止</div></div>
+                    <div class="stat-item"><div class="stat-value" id="statBlocked">0</div><div class="stat-label">未解析</div></div>
                     <div class="stat-item"><div class="stat-value" id="statNormal">0</div><div class="stat-label">正常</div></div>
                 </div>
                 
@@ -667,7 +677,7 @@ https://www.example.com/path/to/page"></textarea>
                         <option value="success">成功</option>
                         <option value="normal">正常</option>
                         <option value="failed">失败</option>
-                        <option value="blocked">停止解析</option>
+                        <option value="blocked">未解析</option>
                     </select>
                     <button class="btn btn-sm btn-primary" onclick="exportSelected()">📥 导出选中</button>
                     <button class="btn btn-sm btn-success" onclick="exportAll()">📥 导出全部</button>
@@ -799,11 +809,12 @@ https://www.example.com/path/to/page"></textarea>
             showToast(`已切换到: ${platforms[platform].name}`, 'info');
         }
         
-        // Tab切换
+        // Tab切换（不依赖全局 event，支持程序化调用）
         function switchTab(tab) {
             currentTab = tab;
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            event.target.classList.add('active');
+            document.querySelectorAll('.tab').forEach(t => {
+                t.classList.toggle('active', t.dataset.tab === tab);
+            });
             document.getElementById('tabQuery').classList.toggle('hidden', tab !== 'query');
             document.getElementById('tabHistory').classList.toggle('hidden', tab !== 'history');
             if (tab === 'history') loadHistory();
@@ -859,11 +870,18 @@ https://www.example.com/path/to/page"></textarea>
                 max_domains_per_batch: parseInt(document.getElementById('cfgMaxBatch').value),
                 proxy_enabled: document.getElementById('cfgProxyEnabled').checked,
                 proxy_url: document.getElementById('cfgProxyUrl').value,
+                allow_lan_access: document.getElementById('cfgLanAccess').checked,
                 platform: currentPlatform
             };
             try {
                 const resp = await fetch('/api/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(config) });
-                if (resp.ok) showToast('配置已保存');
+                const data = await resp.json();
+                if (resp.ok) {
+                    showToast(data.message || '配置已保存');
+                    if (data.config) document.getElementById('cfgLanAccess').checked = !!data.config.allow_lan_access;
+                } else {
+                    showToast(data.error || '保存失败', 'error');
+                }
             } catch (e) { showToast('保存失败', 'error'); }
         }
         
@@ -878,10 +896,24 @@ https://www.example.com/path/to/page"></textarea>
                 document.getElementById('cfgMaxBatch').value = config.max_domains_per_batch;
                 document.getElementById('cfgProxyEnabled').checked = config.proxy_enabled;
                 document.getElementById('cfgProxyUrl').value = config.proxy_url || 'http://127.0.0.1:7897';
+                document.getElementById('cfgLanAccess').checked = config.allow_lan_access !== false;
+                updateLanStatus(config);
                 if (config.platform) {
                     setPlatform(config.platform);
                 }
             } catch (e) { console.error('加载配置失败', e); }
+        }
+        
+        // 显示服务器当前实际监听状态
+        function updateLanStatus(config) {
+            const el = document.getElementById('lanStatus');
+            if (!el) return;
+            if (config.server && config.server.bind_host) {
+                const mode = config.server.lan_active ? '局域网可访问' : '仅本机可访问';
+                el.textContent = `当前监听 ${config.server.bind_host}:${config.server.port}（${mode}）`;
+            } else {
+                el.textContent = '';
+            }
         }
         
         // 查询
@@ -1029,10 +1061,14 @@ https://www.example.com/path/to/page"></textarea>
                                   '<span class="badge badge-invalid">无效</span>';
                 
                 let resolvedBadge = '';
-                if (r.resolved === true) resolvedBadge = '<span class="badge badge-resolved">正常</span>';
-                else if (r.resolved === false) {
-                    resolvedBadge = '<span class="badge badge-blocked">停止</span>';
+                if (r.resolved === true) {
+                    resolvedBadge = '<span class="badge badge-resolved">正常</span>';
+                } else if (r.resolved === false) {
+                    resolvedBadge = '<span class="badge badge-blocked">未解析</span>';
                     if (r.block_reason) resolvedBadge += `<br><small class="error-text" title="${escapeHtml(r.block_reason)}">${escapeHtml(r.block_reason)}</small>`;
+                } else if (r.block_reason) {
+                    // resolved === null：查询超时等不确定状态，展示真实原因
+                    resolvedBadge = `<span class="badge badge-invalid">未知</span><br><small class="error-text" title="${escapeHtml(r.block_reason)}">${escapeHtml(r.block_reason)}</small>`;
                 }
                 
                 const checked = selectedDomains.has(r.domain) ? 'checked' : '';
@@ -1228,11 +1264,16 @@ https://www.example.com/path/to/page"></textarea>
                     error: r.error
                 }));
                 
+                // 加载历史结果到查询页表格
+                currentTaskId = taskId;
                 currentResults = results;
+                selectedDomains.clear();
                 renderResults();
-                showToast('已加载历史记录', 'info');
+                document.getElementById('resultsCard').classList.remove('hidden');
                 switchTab('query');
-            } catch (e) { showToast('加载失败', 'error'); }
+                showToast(`已加载历史记录（${results.length} 条结果）`, 'info');
+                document.getElementById('resultsCard').scrollIntoView({ behavior: 'smooth' });
+            } catch (e) { showToast('加载失败: ' + e.message, 'error'); }
         }
         
         function exportHistory(taskId) {

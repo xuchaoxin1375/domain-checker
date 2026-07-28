@@ -57,3 +57,11 @@ instance/
 
 # Debug
 *.pid
+
+# Runtime settings (local machine config)
+data/settings.json
+
+# Lint & coverage
+.ruff_cache/
+htmlcov/
+coverage.xml

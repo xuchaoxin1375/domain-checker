@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "domain-checker"
+version = "2.5.0"
+description = "域名批量查询系统：批量 WHOIS 查询、DNS 解析状态检查、历史记录与报表导出"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+# 网页界面前端无构建步骤，templates/index.html 为原生 JS
+dependencies = [
+    "flask>=2.0.0",
+    "python-whois>=0.7.3",
+    "openpyxl>=3.0.0",
+    "dnspython>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.9",
+]
+
+[project.urls]
+Repository = "https://github.com/xuchaoxin1375/domain-checker"
+
+[tool.setuptools]
+packages = ["domain_checker"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# 聚焦于确定性的低级错误与风格统一：
+#   E4/E7/E9  pycodestyle 错误子集（语法/逻辑错误类）
+#   E2        空白类
+#   W         pycodestyle 警告
+#   F         pyflakes（未使用导入/变量、未定义名等）
+#   I         import 排序
+#   RUF       ruff 专属规则（noqa 治理、隐式 Optional 等）
+#   SIM       简化建议
+# 未启用 BLE/DTZ 等噪音型规则，原因：
+#   BLE001  现有代码对网络与磁盘 IO 做防御性兜底，逐条收窄异常类型收益低
+#   DTZ005  现有历史数据均为本地 naive 时间，切 timezone 会改变数据语义
+select = ["E4", "E7", "E9", "W", "F", "I", "RUF", "SIM"]
+ignore = [
+    "E741",    # 现有变量名 l/i 风格一致，不大规模改名
+    # 本项目的界面文案、日志、注释均为中文，全角标点（：，。（）等）属预期内容
+    "RUF001", "RUF002", "RUF003",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["domain_checker"]
+
+[tool.ruff.lint.per-file-ignores]
+# conftest 需在 import 包之前设置环境变量；test_checker 用 importorskip 守护可选依赖
+"tests/conftest.py" = ["E402"]
+"tests/test_checker.py" = ["E402"]
