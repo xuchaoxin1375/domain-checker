@@ -13,3 +13,7 @@ task_lock = threading.Lock()
 
 # task_id -> bool，暂停/继续标志（不要求与 task_lock 同步，普通字典操作即可）
 task_pause_flags = {}
+
+# task_id -> bool，取消标志与暂停分开，避免取消后工作线程永久等待
+# （修改时应与 task_pause_flags 一样仅做原子字典操作）
+task_cancel_flags = {}

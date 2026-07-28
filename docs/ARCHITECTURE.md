@@ -4,20 +4,21 @@
 
 ## 总览
 
-```
-浏览器 (templates/index.html, 原生JS)
-        │  HTTP/JSON 轮询（500ms）
-        ▼
-domain_checker.web ──┐        Flask 路由：参数解析 → 调用下层模块
-        │            │
-        ▼            ▼
-domain_checker.tasks   domain_checker.db ──► SQLite (data/domain_checker.db)
-        │  每域名一个守护线程        ▲ 任务完成后批量落库
-        ▼                          │ 历史导出直接读库
-domain_checker.checker ──► WHOIS (python-whois) → DNS (dnspython) → HTTP 探测
-        │
-        ▼
-domain_checker.settings / state：全局配置、配置持久化、内存任务状态
+```mermaid
+flowchart TD
+    Browser[浏览器<br/>templates/index.html] -->|HTTP/JSON 轮询 500ms| Web[domain_checker.web<br/>Flask 路由]
+    Web -->|批量任务| Tasks[domain_checker.tasks<br/>ThreadPoolExecutor<br/>max_workers 并发限制]
+    Web -->|历史查询/导出| DB[domain_checker.db]
+    Tasks --> Checker[domain_checker.checker<br/>单域名流水线]
+    Checker --> Whois[WHOIS<br/>python-whois]
+    Checker --> DNS[DNS<br/>dnspython]
+    Checker --> HTTP[HTTP 探测]
+    Tasks -->|任务完成后批量落库| DB
+    DB --> SQLite[(SQLite<br/>data/domain_checker.db)]
+    Settings[settings.py<br/>配置与持久化] -.-> Web
+    Settings -.-> Tasks
+    State[state.py<br/>内存任务状态] -.-> Web
+    State -.-> Tasks
 ```
 
 ### 模块职责
@@ -25,11 +26,11 @@ domain_checker.settings / state：全局配置、配置持久化、内存任务�
 | 模块 | 职责 | 关键内容 |
 |------|------|----------|
 | `settings.py` | 路径、全局 CONFIG、配置持久化 | `CONFIG`、`PLATFORMS`、`SERVER_RUNTIME`、settings.json 读写、环境变量 |
-| `state.py` | 进程内存中的任务状态 | `task_storage`、`task_lock`、`task_pause_flags` |
+| `state.py` | 进程内存中的任务状态 | `task_storage`、`task_lock`、暂停/取消标志 |
 | `domains.py` | 输入解析 | `parse_domain_input`、`extract_domain`、`is_valid_domain` |
 | `checker.py` | 单域名查询流水线 | WHOIS 重试、DNS 解析检查、结果合并、任务实时更新 |
 | `db.py` | SQLite 读写 | 历史/明细两表 CRUD，`init_db()` 幂等 |
-| `tasks.py` | 批量任务编排 | 线程启动/限流间隔、暂停/继续、完成落库 |
+| `tasks.py` | 批量任务编排 | 线程池并发控制、暂停/继续/取消、完成落库 |
 | `export.py` | 报表导出 | `create_export_file`、CSV/XLSX，表头与状态文案集中定义 |
 | `web.py` | HTTP 层 | Flask 工厂 `create_app()`、全部 API、`run_server()` |
 
@@ -39,19 +40,23 @@ domain_checker.settings / state：全局配置、配置持久化、内存任务�
 
 ### 查询任务生命周期
 
-```
-POST /api/query
-  → parse_domain_input 去重/校验 → generate_task_id
-  → task_storage[task_id] = {status:'processing', ...}      （内存）
-  → 后台线程 process_domains_async
-       → save_history(...,'processing')                     （DB：任务出现）
-       → for d in domains: 每 0.1s 启动一个线程
-            → process_single_domain
-                → query_whois_with_retry（限流 sleep + 失败重试，暂停时自旋等待）
-                → check_domain_resolved（仅 WHOIS 成功时）
-                → 持锁更新 task_storage（results/completed/logs/refresh）
-       → 全部 join 后：save_results + update_history_counts （DB：completed）
-前端每 500ms 轮询 /api/status 与 /api/results 刷新界面
+```mermaid
+flowchart TD
+    Query[POST /api/query] --> Parse[parse_domain_input<br/>去重与校验]
+    Parse --> Task[创建 task_storage<br/>status: processing]
+    Task --> Runner[后台 process_domains_async]
+    Runner --> History[save_history<br/>写入 processing 历史]
+    Runner --> Pool[ThreadPoolExecutor<br/>每个域名一个工作项]
+    Pool --> Single[process_single_domain]
+    Single --> Whois[WHOIS 重试与限流]
+    Whois --> Resolve{WHOIS 成功?}
+    Resolve -->|是| DNS[DNS 解析与 HTTP 探测]
+    Resolve -->|否| Result[合并结果]
+    DNS --> Result
+    Result --> Memory[持锁更新 results/logs/completed]
+    Pool --> Save[全部工作项完成]
+    Save --> DB[save_results + update_history_counts]
+    Client[前端每 500ms 轮询 status/results] -.-> Task
 ```
 
 状态机：`processing → completed`；`api_cancel` 可置 `cancelled`（线程仍会自行跑完当前域名）。
@@ -95,15 +100,18 @@ SQLite（`query_history` + `query_results`），表结构见 `db.init_db()` 的 
 - 共享状态保护：`config_lock`（CONFIG 读写）、`task_lock`（task_storage 读写）
 - 写日志/改先决步骤时注意：在 `task_lock` 内不做数据库 IO（完成落库在锁外执行）
 - `task_pause_flags` 为普通 dict，布尔读写本身原子性足够
-- 已知缺口：`max_workers` 未生效（每域名一个线程）、无信号量限流、大批量场景线程数≈域名数
+- 批量查询通过 `ThreadPoolExecutor` 限制并发数，`max_workers` 在任务创建时读取并对非法值做边界保护
+- 暂停只阻止尚未开始的工作项；取消会让尚未开始的工作项跳过执行，在途同步请求无法强制中断
 
 ## 配置流
 
-```
-CONFIG 默认值 (settings.py)
-   ← 覆盖 ← settings.json（启动时 load_config_from_file）
-   ← 覆盖 ← POST /api/config（随后 save_config_to_file 落盘）
-服务器监听：DOMAIN_CHECKER_HOST 显式指定优先；否则按 allow_lan_access 推导 0.0.0.0/127.0.0.1
+```mermaid
+flowchart LR
+    Defaults[CONFIG 默认值<br/>settings.py] -->|启动时覆盖| File[settings.json]
+    File -->|网页保存配置| API[POST /api/config]
+    API --> Persist[save_config_to_file<br/>持久化]
+    Env[环境变量<br/>DOMAIN_CHECKER_HOST] --> Server[服务器监听地址]
+    API --> Server
 ```
 
 `POST /api/config` 对 `allow_lan_access` 做变更检测，仅变化时在响应中提示需要重启；
@@ -131,12 +139,10 @@ CONFIG 默认值 (settings.py)
 
 ## 已知技术债
 
-1. 线程模型：每域名一个线程 + `time.sleep` 限流，建议改为 `ThreadPoolExecutor + 信号量`，
-   并让 `max_workers` 真正生效（注意保持 pause 语义）
-2. 取消任务只是阻止启动新域名、置 cancelled，不会中断在途线程
-3. 重启后内存任务丢失，重查/进度接口 404；可考虑任务状态全量入库
-4. WHOIS 同步阻塞，`timeout` 配置未真正作用于 whois 调用（底层 socket 超时）
-5. `PUT/DELETE` 语义化的历史记录清理接口与分页查询可进一步完善
+1. 取消任务无法强制中断已经开始的同步 WHOIS/DNS 请求，只能阻止尚未开始的工作项
+2. 重启后内存任务丢失，重查/进度接口 404；可考虑任务状态全量入库
+3. WHOIS 同步阻塞，`timeout` 配置未真正作用于 whois 调用（底层 socket 超时）
+4. `PUT/DELETE` 语义化的历史记录清理接口与分页查询可进一步完善
 
 ## 测试策略
 
