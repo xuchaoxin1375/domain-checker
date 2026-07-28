@@ -1,0 +1,6 @@
+﻿域名,状态,注册商,注册日期,过期日期,更新时间,DNS服务器,DNSSEC,解析状态,DNS记录,封禁原因,错误备注
+example.com,查询成功,RESERVED-Internet Assigned Numbers Authority,1995-08-14,2026-08-13,2026-01-16,"ELLIOTT.NS.CLOUDFLARE.COM, HERA.NS.CLOUDFLARE.COM",signedDelegation,正常解析,"172.66.147.243, 104.20.23.154",,
+qq.com,查询成功,"MarkMonitor Information Technology (Shanghai) Co., Ltd.",1995-05-04,2034-07-27,2026-05-22,"NS1.QQ.COM, NS2.QQ.COM, NS3.QQ.COM, NS4.QQ.COM",unsigned,正常解析,"113.108.81.189, 203.205.254.157, 123.150.76.218",,
+notexist12345.com,查询失败,,,,,,,未知,,,"WHOIS解析错误: No match for ""NOTEXIST12345.COM"".
+>>> Last update of whois database: 2026-07-28"
+baidu.com,查询成功,"MarkMonitor Information Technology (Shanghai) Co., Ltd.",1999-10-11,2028-10-11,2025-04-08,"NS1.BAIDU.COM, NS2.BAIDU.COM, NS3.BAIDU.COM, NS4.BAIDU.COM, NS7.BAIDU.COM",unsigned,正常解析,"124.237.177.164, 110.242.74.102, 111.63.65.103, 111.63.65.247",,
