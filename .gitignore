@@ -60,6 +60,8 @@ instance/
 
 # Runtime settings (local machine config)
 data/settings.json
+data/
+*.db
 
 # Lint & coverage
 .ruff_cache/
