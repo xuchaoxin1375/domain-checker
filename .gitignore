@@ -47,8 +47,8 @@ temp/
 *.tmp
 
 # Export files (keep sample files)
-# *.csv
-# *.xlsx
+*.csv
+*.xlsx
 
 # Flask
 instance/

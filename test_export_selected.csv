@@ -1,3 +1,0 @@
-﻿域名,状态,注册商,注册日期,过期日期,更新时间,DNS服务器,DNSSEC,解析状态,DNS记录,封禁原因,错误备注
-github.com,查询成功,MarkMonitor Inc.,2007-10-09,2026-10-09,2024-09-07,"DNS1.P08.NSONE.NET, DNS2.P08.NSONE.NET, DNS3.P08.NSONE.NET, DNS4.P08.NSONE.NET, NS-1283.AWSDNS-32.ORG",unsigned,正常解析,140.82.116.4,,
-baidu.com,查询成功,"MarkMonitor Information Technology (Shanghai) Co., Ltd.",1999-10-11,2028-10-11,2025-04-08,"NS1.BAIDU.COM, NS2.BAIDU.COM, NS3.BAIDU.COM, NS4.BAIDU.COM, NS7.BAIDU.COM",unsigned,正常解析,"111.63.65.103, 111.63.65.247, 124.237.177.164, 110.242.74.102",,
