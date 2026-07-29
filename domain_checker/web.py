@@ -9,14 +9,24 @@ import json
 import logging
 import os
 import threading
+import time
 from datetime import datetime
 
 from flask import Flask, jsonify, render_template, request, send_file
 
 from . import settings
-from .db import clear_old_history, delete_history, get_history, get_history_detail, init_db
+from .db import (
+    clear_all_history,
+    clear_old_history,
+    delete_histories,
+    delete_history,
+    get_history,
+    get_history_detail,
+    init_db,
+)
 from .domains import parse_domain_input
 from .export import create_export_file
+from .operations import get_operations, record_operation
 from .settings import (
     CONFIG,
     PLATFORMS,
@@ -31,7 +41,7 @@ from .settings import (
     save_config_to_file,
 )
 from .state import task_lock, task_pause_flags, task_storage
-from .tasks import generate_task_id, process_domains_async, retry_domains_async
+from .tasks import create_queued_result, generate_task_id, process_domains_async, retry_domains_async
 
 # 日志配置（CLI 场景下各自配置，这里仅对未配置过的环境生效）
 logging.basicConfig(
@@ -67,6 +77,7 @@ def _restore_task_from_history(task_id: str) -> bool:
         )
         records = result.get('dns_records')
         result['dns_records'] = records.split(',') if records else []
+        result['query_state'] = 'completed'
         results.append(result)
 
     completed_at = history.get('completed_at') or datetime.now().isoformat()
@@ -83,7 +94,7 @@ def _restore_task_from_history(task_id: str) -> bool:
         'refresh': True,
         'created_at': history.get('created_at') or completed_at,
         'completed_at': completed_at,
-        'platform': saved_config.get('platform', 'whois'),
+        'platform': saved_config.get('platform', 'rdap'),
         'operation': 'completed',
         'query_mode': 'unlimited',
         'query_timeout': normalize_timeout(saved_config.get('timeout', CONFIG['timeout'])),
@@ -134,7 +145,7 @@ def _register_routes(flask_app: Flask):
                         elif key in ['proxy_enabled', 'allow_lan_access']:
                             val = bool(val)
                         elif key == 'platform':
-                            val = val if val in PLATFORMS else 'whois'
+                            val = val if val in PLATFORMS else 'rdap'
                         CONFIG[key] = val
                 lan_changed = bool(data.get('allow_lan_access', old_allow_lan)) != old_allow_lan
 
@@ -160,11 +171,17 @@ def _register_routes(flask_app: Flask):
             'server': get_server_info()
         })
 
+    @flask_app.route('/api/operations')
+    def api_operations():
+        """获取最近的服务启动与终止记录。"""
+        limit = request.args.get('limit', 100, type=int)
+        return jsonify({'operations': get_operations(limit)})
+
     @flask_app.route('/api/query', methods=['POST'])
     def api_query():
         data = request.get_json()
         input_text = data.get('domains', '')
-        platform = data.get('platform', 'whois')
+        platform = data.get('platform', 'rdap')
         query_mode = normalize_query_mode(data.get('query_mode', data.get('mode', 'unlimited')))
         with config_lock:
             query_timeout = normalize_timeout(data.get('query_timeout', CONFIG['timeout']))
@@ -189,7 +206,8 @@ def _register_routes(flask_app: Flask):
         with task_lock:
             task_storage[task_id] = {
                 'status': 'processing', 'total': len(domains), 'completed': 0,
-                'results': [], 'logs': [], 'refresh': False,
+                'results': [create_queued_result(domain) for domain in domains],
+                'logs': [], 'refresh': False,
                 'created_at': datetime.now().isoformat(), 'completed_at': None,
                 'platform': platform, 'operation': 'query',
                 'query_mode': query_mode,
@@ -197,6 +215,8 @@ def _register_routes(flask_app: Flask):
                 'operation_total': len(domains), 'operation_completed': 0,
                 'operation_started_at': datetime.now().isoformat(),
                 'duration_seconds': None,
+                'paused_duration_seconds': 0.0,
+                '_paused_started_monotonic': None,
             }
 
         logger.info(f"[任务{task_id}] 创建，使用平台: {PLATFORMS.get(platform, {}).get('name', platform)}")
@@ -225,7 +245,11 @@ def _register_routes(flask_app: Flask):
         operation_completed = task.get('operation_completed', task['completed'])
         started_at = datetime.fromisoformat(task.get('operation_started_at', task['created_at']))
         ended_at = datetime.fromisoformat(task['completed_at']) if task.get('completed_at') else datetime.now()
-        elapsed_seconds = max(0, round((ended_at - started_at).total_seconds(), 2))
+        paused_duration = float(task.get('paused_duration_seconds', 0.0))
+        paused_at = task.get('_paused_started_monotonic')
+        if paused_at is not None:
+            paused_duration += max(0.0, time.monotonic() - paused_at)
+        elapsed_seconds = max(0, round((ended_at - started_at).total_seconds() - paused_duration, 2))
         return jsonify({
             'status': task['status'], 'total': task['total'],
             'completed': task['completed'],
@@ -275,23 +299,48 @@ def _register_routes(flask_app: Flask):
         task_pause_flags[task_id] = True
         with task_lock:
             if task_id in task_storage:
-                task_storage[task_id]['logs'].append({
+                task = task_storage[task_id]
+                paused_states = task.setdefault('_paused_query_states', {})
+                for result in task['results']:
+                    query_state = result.get('query_state', 'completed')
+                    if query_state == 'completed':
+                        continue
+                    if query_state != 'paused':
+                        paused_states[result['domain']] = query_state
+                    result['query_state'] = 'paused'
+                task['refresh'] = True
+                if task.get('_paused_started_monotonic') is None:
+                    task['_paused_started_monotonic'] = time.monotonic()
+                task['logs'].append({
                     'time': datetime.now().strftime('%H:%M:%S'),
                     'level': 'warn',
-                    'message': '⏸ 任务已暂停'
+                    'message': '⏸ 已请求暂停；当前网络请求完成后停止进入下一阶段'
                 })
         return jsonify({'message': '已暂停', 'paused': True})
 
     @flask_app.route('/api/resume/<task_id>', methods=['POST'])
     def api_resume(task_id):
-        task_pause_flags[task_id] = False
         with task_lock:
             if task_id in task_storage:
-                task_storage[task_id]['logs'].append({
+                task = task_storage[task_id]
+                paused_states = task.pop('_paused_query_states', {})
+                for result in task['results']:
+                    if result.get('query_state') == 'paused':
+                        result['query_state'] = paused_states.get(result['domain'], 'queued')
+                task['refresh'] = True
+                paused_at = task.pop('_paused_started_monotonic', None)
+                if paused_at is not None:
+                    task['paused_duration_seconds'] = (
+                        float(task.get('paused_duration_seconds', 0.0))
+                        + max(0.0, time.monotonic() - paused_at)
+                    )
+                task['_paused_started_monotonic'] = None
+                task['logs'].append({
                     'time': datetime.now().strftime('%H:%M:%S'),
                     'level': 'info',
                     'message': '▶ 任务已继续'
                 })
+        task_pause_flags[task_id] = False
         return jsonify({'message': '已继续', 'paused': False})
 
     @flask_app.route('/api/retry/<task_id>', methods=['POST'])
@@ -329,12 +378,23 @@ def _register_routes(flask_app: Flask):
             task['operation_started_at'] = datetime.now().isoformat()
             task['completed_at'] = None
             task['duration_seconds'] = None
+            task['paused_duration_seconds'] = 0.0
+            task['_paused_started_monotonic'] = None
+            for result in task['results']:
+                if result['domain'] in domains:
+                    result['query_state'] = 'queued'
+                    result['query_time'] = None
+                    result['query_duration_seconds'] = None
 
         thread = threading.Thread(target=retry_domains_async, args=(domains, task_id))
         thread.daemon = True
         thread.start()
 
-        return jsonify({'message': f'正在重新查询 {len(domains)} 个域名', 'started': True})
+        return jsonify({
+            'message': f'正在重新查询 {len(domains)} 个域名',
+            'started': True,
+            'domains': domains,
+        })
 
     @flask_app.route('/api/retry-failed/<task_id>', methods=['POST'])
     def api_retry_failed(task_id):
@@ -350,9 +410,10 @@ def _register_routes(flask_app: Flask):
             query_mode = normalize_query_mode(data.get('query_mode', data.get('mode', task.get('query_mode', 'unlimited'))))
             query_timeout = normalize_timeout(data.get('query_timeout', task.get('query_timeout', default_timeout)))
             failed_domains = [r['domain'] for r in task['results']
-                              if r['status'] in {'failed', 'timeout', 'invalid'}]
+                              if (r['status'] in {'failed', 'timeout', 'invalid'}
+                                  or (r['status'] == 'success' and r.get('resolved') is None))]
             if not failed_domains:
-                return jsonify({'message': '没有需要重试的域名', 'started': False})
+                return jsonify({'message': '没有查询异常或解析未知的域名', 'started': False})
             task['refresh'] = True
             task['status'] = 'processing'
             task['operation'] = 'retry'
@@ -363,12 +424,24 @@ def _register_routes(flask_app: Flask):
             task['operation_started_at'] = datetime.now().isoformat()
             task['completed_at'] = None
             task['duration_seconds'] = None
+            task['paused_duration_seconds'] = 0.0
+            task['_paused_started_monotonic'] = None
+            failed_domain_set = set(failed_domains)
+            for result in task['results']:
+                if result['domain'] in failed_domain_set:
+                    result['query_state'] = 'queued'
+                    result['query_time'] = None
+                    result['query_duration_seconds'] = None
 
         thread = threading.Thread(target=retry_domains_async, args=(failed_domains, task_id))
         thread.daemon = True
         thread.start()
 
-        return jsonify({'message': f'正在重试 {len(failed_domains)} 个域名', 'started': True})
+        return jsonify({
+            'message': f'正在重查 {len(failed_domains)} 个查询异常或解析未知的域名',
+            'started': True,
+            'domains': failed_domains,
+        })
 
     @flask_app.route('/api/export/<task_id>')
     def api_export(task_id):
@@ -388,6 +461,7 @@ def _register_routes(flask_app: Flask):
             results = [{'domain': r['domain'], 'status': r['status'],
                         'whois_status': r['whois_status'], 'hold_status': r['hold_status'],
                         'registrar': r['registrar'],
+                        'contact_email': r['contact_email'],
                         'registration_date': r['registration_date'], 'expiration_date': r['expiration_date'],
                         'updated_date': r['updated_date'], 'name_servers': r['name_servers'],
                         'dnssec': r['dnssec'], 'resolved': bool(r['resolved']) if r['resolved'] is not None else None,
@@ -419,8 +493,14 @@ def _register_routes(flask_app: Flask):
         task_pause_flags[task_id] = True
         with task_lock:
             if task_id in task_storage:
-                task_storage[task_id]['status'] = 'cancelled'
-                task_storage[task_id]['logs'].append({
+                task = task_storage[task_id]
+                task['status'] = 'cancelled'
+                task.pop('_paused_query_states', None)
+                for result in task['results']:
+                    if result.get('query_state', 'completed') != 'completed':
+                        result['query_state'] = 'cancelled'
+                task['refresh'] = True
+                task['logs'].append({
                     'time': datetime.now().strftime('%H:%M:%S'),
                     'level': 'warn',
                     'message': '任务已取消'
@@ -447,8 +527,46 @@ def _register_routes(flask_app: Flask):
     @flask_app.route('/api/history/<task_id>', methods=['DELETE'])
     def api_delete_history(task_id):
         """删除历史记录。"""
+        with task_lock:
+            task = task_storage.get(task_id)
+            if task and task.get('status') == 'processing':
+                return jsonify({'error': '任务正在运行，不能删除历史'}), 409
         delete_history(task_id)
         return jsonify({'message': '已删除'})
+
+    @flask_app.route('/api/history/delete-batch', methods=['POST'])
+    def api_delete_history_batch():
+        """批量删除选中的历史记录。"""
+        data = request.get_json(silent=True) or {}
+        task_ids = data.get('task_ids', [])
+        if not isinstance(task_ids, list):
+            return jsonify({'error': 'task_ids 必须是任务 ID 数组'}), 400
+        task_ids = list(dict.fromkeys(str(task_id).strip() for task_id in task_ids if str(task_id).strip()))
+        if not task_ids:
+            return jsonify({'error': '请选择要删除的历史记录'}), 400
+        if len(task_ids) > 500:
+            return jsonify({'error': '单次最多删除 500 条历史记录'}), 400
+        with task_lock:
+            busy_ids = [
+                task_id for task_id in task_ids
+                if task_storage.get(task_id, {}).get('status') == 'processing'
+            ]
+        if busy_ids:
+            return jsonify({'error': f'任务正在运行，不能删除: {", ".join(busy_ids)}'}), 409
+        deleted = delete_histories(task_ids)
+        return jsonify({'message': f'已删除 {deleted} 条历史记录', 'deleted': deleted})
+
+    @flask_app.route('/api/history/clear-all', methods=['POST'])
+    def api_clear_all_history():
+        """清理全部历史记录。"""
+        if not request.is_json:
+            return jsonify({'error': '清理请求必须使用 JSON'}), 415
+        with task_lock:
+            busy = any(task.get('status') == 'processing' for task in task_storage.values())
+        if busy:
+            return jsonify({'error': '仍有查询任务运行，不能清理全部历史'}), 409
+        deleted = clear_all_history()
+        return jsonify({'message': f'已清理全部历史，共 {deleted} 条', 'deleted': deleted})
 
     @flask_app.route('/api/history/clear', methods=['POST'])
     def api_clear_history():
@@ -503,7 +621,14 @@ def run_server():
     print(f"数据目录: {settings.DATA_DIR}")
     print(f"数据库: {settings.DB_PATH}")
     print("=" * 50)
-    app.run(debug=debug, host=host, port=port, threaded=True)
+    serving_process = not debug or os.environ.get('WERKZEUG_RUN_MAIN', '').lower() == 'true'
+    if serving_process:
+        record_operation('启动', f'服务开始监听 {host}:{port}，debug={debug}')
+    try:
+        app.run(debug=debug, host=host, port=port, threaded=True)
+    finally:
+        if serving_process:
+            record_operation('终止', '服务进程已停止')
 
 
 # 模块级应用实例（init_db / 加载配置随导入完成）

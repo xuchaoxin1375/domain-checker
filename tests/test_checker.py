@@ -14,6 +14,7 @@ import pytest
 dns = pytest.importorskip('dns.resolver')
 
 from domain_checker.checker import check_domain_resolved, process_single_domain
+from domain_checker.state import task_lock, task_pause_flags, task_storage
 
 
 def _fake(exc_cls):
@@ -59,9 +60,24 @@ class TestCheckDomainResolved:
         assert '权威DNS' in r['block_reason']
 
     def test_timeout_is_unknown_not_not_exist(self):
-        r = self._check(_fake(dns.Timeout))
+        with mock.patch('dns.resolver.Resolver') as resolver:
+            resolver.return_value.resolve.side_effect = _resolve_side_effect(_fake(dns.Timeout))
+            r = check_domain_resolved('some-registered-domain.com')
         assert r['resolved'] is None
         assert '超时' in r['block_reason']
+        assert '已自动重试 1 次' in r['block_reason']
+        assert '建议重新查询' in r['block_reason']
+        assert resolver.return_value.resolve.call_count == 2
+
+    def test_transient_dns_failure_recovers_on_retry(self):
+        answers = ['1.2.3.4']
+        with mock.patch('dns.resolver.Resolver') as resolver, \
+                mock.patch('urllib.request.urlopen'):
+            resolver.return_value.resolve.side_effect = [_fake(dns.Timeout), answers]
+            r = check_domain_resolved('some-registered-domain.com')
+        assert r['resolved'] is True
+        assert r['dns_records'] == ['1.2.3.4']
+        assert resolver.return_value.resolve.call_count == 2
 
     def test_dns_timeout_uses_configured_timeout(self):
         from domain_checker import settings
@@ -78,6 +94,51 @@ class TestCheckDomainResolved:
         finally:
             with settings.config_lock:
                 settings.CONFIG['timeout'] = original
+
+    def test_dns_and_http_probe_use_explicit_timeout(self):
+        with mock.patch('dns.resolver.Resolver') as resolver, \
+                mock.patch('urllib.request.urlopen') as urlopen:
+            resolver.return_value.resolve.return_value = ['1.2.3.4']
+
+            result = check_domain_resolved('example.com', timeout=4)
+
+        assert result['resolved'] is True
+        assert resolver.return_value.timeout == 4
+        assert resolver.return_value.lifetime == 4
+        assert urlopen.call_args.kwargs['timeout'] == 4
+
+    def test_brief_dns_check_skips_http_probe_and_retry(self):
+        with mock.patch('dns.resolver.Resolver') as resolver, \
+                mock.patch('urllib.request.urlopen') as urlopen:
+            resolver.return_value.resolve.side_effect = _resolve_side_effect(_fake(dns.Timeout))
+
+            result = check_domain_resolved(
+                'example.com', timeout=3, attempts=1, check_http=False,
+            )
+
+        assert result['resolved'] is None
+        assert '已自动重试' not in result['block_reason']
+        assert resolver.return_value.resolve.call_count == 1
+        urlopen.assert_not_called()
+
+
+def test_process_single_domain_completes_queued_placeholder():
+    with task_lock:
+        task_storage['STAGE02'] = {
+            'operation': 'query', 'completed': 0,
+            'results': [{'domain': 'invalid domain', 'query_state': 'querying'}],
+            'logs': [], 'refresh': False,
+        }
+    try:
+        result = process_single_domain('invalid domain', task_id='STAGE02')
+        with task_lock:
+            task = task_storage['STAGE02']
+            assert task['completed'] == 1
+            assert task['results'][0]['query_state'] == 'completed'
+        assert result['query_state'] == 'completed'
+    finally:
+        with task_lock:
+            task_storage.pop('STAGE02', None)
 
 
 class TestQueryWhoisNotRegistered:
@@ -100,9 +161,9 @@ class TestQueryWhoisNotRegistered:
             with mock.patch.object(whois_mod, 'whois') as m_whois, \
                     mock.patch('domain_checker.checker._query_rdap_fallback', return_value=None):
                 m_whois.side_effect = side_effect
-                result = (query_whois_with_retry('not-a-real-domain-xyz.com', query_mode=query_mode)
-                          if query_mode == 'quick'
-                          else query_whois_with_retry('not-a-real-domain-xyz.com'))
+                result = query_whois_with_retry(
+                    'not-a-real-domain-xyz.com', query_mode=query_mode,
+                )
         finally:
             with settings.config_lock:
                 settings.CONFIG.update(saved)
@@ -177,6 +238,15 @@ class TestQueryWhoisNotRegistered:
         assert result['status'] == 'success'
         assert result['whois_status'] == 'clientHold, clientTransferProhibited'
         assert calls == 1
+
+    def test_whois_contact_emails_are_deduplicated(self):
+        registered = SimpleNamespace(
+            domain_name='EXAMPLE.COM', registrar='Example Registrar', creation_date=None,
+            expiration_date=None, updated_date=None, name_servers=None, status='ok', dnssec=None,
+            emails=['Abuse@Example.com', 'admin@example.com', 'abuse@example.com'], email=None,
+        )
+        result, _calls = self._run(lambda *args, **kwargs: registered)
+        assert result['contact_email'] == 'abuse@example.com, admin@example.com'
     def test_quota_still_retries(self):
         import whois as whois_mod
         result, calls = self._run(whois_mod.exceptions.WhoisQuotaExceededError('quota'))
@@ -202,6 +272,17 @@ class TestQueryWhoisNotRegistered:
         assert calls == 1
         assert sleep.call_args_list[0].args[0] < 0.13
 
+    def test_brief_mode_limits_whois_to_one_attempt(self):
+        import whois as whois_mod
+
+        result, calls = self._run(
+            whois_mod.exceptions.WhoisQuotaExceededError('quota'),
+            query_mode='brief',
+        )
+
+        assert result['status'] == 'failed'
+        assert calls == 1
+
 
 class TestDomainHold:
     def test_client_hold_is_domain_block_and_skips_dns(self, monkeypatch):
@@ -216,7 +297,7 @@ class TestDomainHold:
         dns_check = mock.Mock()
         monkeypatch.setattr('domain_checker.checker.check_domain_resolved', dns_check)
 
-        result = process_single_domain('cartutuoficina.com')
+        result = process_single_domain('cartutuoficina.com', platform='whois')
 
         assert result['resolved'] is False
         assert result['hold_status'] == 'clientHold'
@@ -225,6 +306,160 @@ class TestDomainHold:
         assert result['query_time']
         assert result['query_duration_seconds'] >= 0
         dns_check.assert_not_called()
+
+    def test_brief_mode_passes_minimal_dns_options(self, monkeypatch):
+        registration_result = {
+            'domain': 'example.com', 'status': 'success',
+            'registrar': None, 'registration_date': None, 'expiration_date': None,
+            'updated_date': None, 'name_servers': None, 'dnssec': None,
+            'contact_email': None, 'whois_status': 'active', 'hold_status': None,
+            'error': None, 'raw_response': None,
+        }
+        dns_result = {
+            'resolved': True, 'dns_records': ['1.2.3.4'],
+            'http_accessible': None, 'block_reason': None,
+        }
+        monkeypatch.setattr(
+            'domain_checker.checker.query_registration_with_retry',
+            mock.Mock(return_value=registration_result),
+        )
+        dns_check = mock.Mock(return_value=dns_result)
+        monkeypatch.setattr('domain_checker.checker.check_domain_resolved', dns_check)
+
+        result = process_single_domain('example.com', query_mode='brief', query_timeout=3)
+
+        assert result['resolved'] is True
+        dns_check.assert_called_once_with(
+            'example.com', timeout=3, attempts=1, check_http=False,
+        )
+
+    def test_pause_after_registration_blocks_dns_until_resume(self, monkeypatch):
+        import threading
+        import time
+
+        task_id = 'PAUSEDNS'
+        registration_done = threading.Event()
+        result_holder = {}
+        registration_result = {
+            'domain': 'example.com', 'status': 'success',
+            'registrar': None, 'registration_date': None, 'expiration_date': None,
+            'updated_date': None, 'name_servers': None, 'dnssec': None,
+            'contact_email': None, 'whois_status': 'active', 'hold_status': None,
+            'error': None, 'raw_response': None,
+        }
+
+        def registration_query(*args, **kwargs):
+            task_pause_flags[task_id] = True
+            registration_done.set()
+            return registration_result
+
+        dns_check = mock.Mock(return_value={
+            'resolved': True, 'dns_records': ['1.2.3.4'],
+            'http_accessible': None, 'block_reason': None,
+        })
+        monkeypatch.setattr('domain_checker.checker.query_registration_with_retry', registration_query)
+        monkeypatch.setattr('domain_checker.checker.check_domain_resolved', dns_check)
+        with task_lock:
+            task_storage[task_id] = {'status': 'processing'}
+
+        def run_query():
+            threading.current_thread().task_id = task_id
+            result_holder['result'] = process_single_domain('example.com', platform='whois')
+
+        worker = threading.Thread(target=run_query)
+        try:
+            worker.start()
+            assert registration_done.wait(1)
+            time.sleep(0.15)
+            dns_check.assert_not_called()
+            assert worker.is_alive()
+            task_pause_flags[task_id] = False
+            worker.join(timeout=2)
+            assert not worker.is_alive()
+            assert result_holder['result']['resolved'] is True
+            dns_check.assert_called_once_with('example.com', timeout=None)
+        finally:
+            task_pause_flags.pop(task_id, None)
+            with task_lock:
+                task_storage.pop(task_id, None)
+
+    def test_pause_during_final_dns_blocks_result_submission(self, monkeypatch):
+        import threading
+        import time
+
+        task_id = 'PAUSEFINAL'
+        dns_done = threading.Event()
+        result_holder = {}
+        registration_result = {
+            'domain': 'example.com', 'status': 'success',
+            'registrar': None, 'registration_date': None, 'expiration_date': None,
+            'updated_date': None, 'name_servers': None, 'dnssec': None,
+            'contact_email': None, 'whois_status': 'active', 'hold_status': None,
+            'error': None, 'raw_response': None,
+        }
+
+        def dns_query(*args, **kwargs):
+            task_pause_flags[task_id] = True
+            dns_done.set()
+            return {
+                'resolved': True, 'dns_records': ['1.2.3.4'],
+                'http_accessible': None, 'block_reason': None,
+            }
+
+        monkeypatch.setattr(
+            'domain_checker.checker.query_registration_with_retry',
+            mock.Mock(return_value=registration_result),
+        )
+        monkeypatch.setattr('domain_checker.checker.check_domain_resolved', dns_query)
+        with task_lock:
+            task_storage[task_id] = {'status': 'processing'}
+
+        def run_query():
+            threading.current_thread().task_id = task_id
+            result_holder['result'] = process_single_domain(
+                'example.com', platform='whois', query_mode='brief',
+            )
+
+        worker = threading.Thread(target=run_query)
+        try:
+            worker.start()
+            assert dns_done.wait(1)
+            time.sleep(0.15)
+            assert worker.is_alive()
+            assert 'result' not in result_holder
+            task_pause_flags[task_id] = False
+            worker.join(timeout=2)
+            assert not worker.is_alive()
+            assert result_holder['result']['resolved'] is True
+        finally:
+            task_pause_flags.pop(task_id, None)
+            with task_lock:
+                task_storage.pop(task_id, None)
+
+    def test_single_domain_duration_excludes_pause_wait(self, monkeypatch):
+        registration_result = {
+            'domain': 'held.com', 'status': 'success',
+            'registrar': None, 'registration_date': None, 'expiration_date': None,
+            'updated_date': None, 'name_servers': None, 'dnssec': None,
+            'contact_email': None, 'whois_status': 'clientHold', 'hold_status': None,
+            'error': None, 'raw_response': None,
+        }
+        monkeypatch.setattr(
+            'domain_checker.checker.query_registration_with_retry',
+            mock.Mock(return_value=registration_result),
+        )
+        monkeypatch.setattr(
+            'domain_checker.checker.get_task_paused_duration',
+            mock.Mock(side_effect=[2.0, 7.0]),
+        )
+        monkeypatch.setattr(
+            'domain_checker.checker.time.perf_counter',
+            mock.Mock(side_effect=[100.0, 110.0]),
+        )
+
+        result = process_single_domain('held.com', platform='whois')
+
+        assert result['query_duration_seconds'] == 5.0
 
     def test_whois_network_failure_falls_back_to_rdap_hold(self, monkeypatch):
         payload = {
@@ -240,7 +475,7 @@ class TestDomainHold:
         dns_check = mock.Mock()
         monkeypatch.setattr('domain_checker.checker.check_domain_resolved', dns_check)
 
-        result = process_single_domain('handwerkszubehoer.com', query_mode='quick')
+        result = process_single_domain('handwerkszubehoer.com', query_mode='quick', platform='whois')
 
         assert result['status'] == 'success'
         assert result['hold_status'] == 'clientHold'
@@ -265,10 +500,13 @@ class TestSubdomainRegistrationLookup:
         monkeypatch.setattr('domain_checker.checker.urllib.request.urlopen', urlopen)
         monkeypatch.setattr('domain_checker.checker.check_domain_resolved', dns_check)
 
-        result = process_single_domain('www.baidu.com', query_mode='unlimited', query_timeout=5)
+        result = process_single_domain(
+            'www.baidu.com', query_mode='unlimited', query_timeout=5, platform='whois',
+        )
 
         assert whois_query.call_args.args[0] == 'baidu.com'
         assert urlopen.call_args.args[0].full_url.endswith('/baidu.com')
+        assert urlopen.call_args.kwargs['timeout'] == 5
         assert '/www.baidu.com' not in urlopen.call_args.args[0].full_url
         assert result['domain'] == 'www.baidu.com'
         assert result['status'] == 'success'
@@ -284,13 +522,39 @@ def test_unlimited_mode_adds_no_active_wait(monkeypatch):
         expiration_date=None, updated_date=None, name_servers=None, status=None, dnssec=None,
     )
     sleep = mock.Mock()
-    monkeypatch.setattr('domain_checker.checker.whois.whois', mock.Mock(return_value=registered))
+    whois_query = mock.Mock(return_value=registered)
+    monkeypatch.setattr('domain_checker.checker.whois.whois', whois_query)
     monkeypatch.setattr('domain_checker.checker.time.sleep', sleep)
 
     result = query_whois_with_retry('example.com', query_mode='unlimited', timeout=9)
 
     assert result['status'] == 'success'
+    assert whois_query.call_args.kwargs['timeout'] == 9
     sleep.assert_not_called()
+
+
+def test_timeout_is_applied_per_whois_attempt_and_rdap_fallback(monkeypatch):
+    from domain_checker import settings
+    from domain_checker.checker import query_whois_with_retry
+
+    with settings.config_lock:
+        original_retries = settings.CONFIG['max_retries']
+        settings.CONFIG['max_retries'] = 3
+    whois_query = mock.Mock(side_effect=socket.timeout('timed out'))
+    rdap_fallback = mock.Mock(return_value=None)
+    monkeypatch.setattr('domain_checker.checker.whois.whois', whois_query)
+    monkeypatch.setattr('domain_checker.checker._query_rdap_fallback', rdap_fallback)
+    monkeypatch.setattr('domain_checker.checker.time.sleep', mock.Mock())
+    try:
+        result = query_whois_with_retry('example.com', query_mode='unlimited', timeout=3)
+    finally:
+        with settings.config_lock:
+            settings.CONFIG['max_retries'] = original_retries
+
+    assert result['status'] == 'timeout'
+    assert whois_query.call_count == 3
+    assert all(call.kwargs['timeout'] == 3 for call in whois_query.call_args_list)
+    rdap_fallback.assert_called_once_with('example.com', 3)
 
 
 def test_whois_success_preserves_raw_response(monkeypatch):
@@ -306,3 +570,104 @@ def test_whois_success_preserves_raw_response(monkeypatch):
     result = query_whois_with_retry('example.com', query_mode='unlimited')
 
     assert result['raw_response'] == 'Domain Name: EXAMPLE.COM\nDomain Status: ok'
+
+
+class TestRdapPrimaryQuery:
+    @staticmethod
+    def _response(payload):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(payload).encode()
+        return response
+
+    def test_public_suffix_normalizes_co_uk_subdomain(self):
+        from domain_checker.checker import _registration_lookup_domain
+
+        assert _registration_lookup_domain('www.shop.example.co.uk') == 'example.co.uk'
+
+    def test_iana_bootstrap_discovers_authoritative_service(self, monkeypatch):
+        from domain_checker import checker
+
+        bootstrap = {'services': [[['uk'], ['https://rdap.example.test/uk/']]]}
+        payload = {'ldhName': 'EXAMPLE.CO.UK', 'status': ['active']}
+        urlopen = mock.Mock(side_effect=[self._response(bootstrap), self._response(payload)])
+        monkeypatch.setattr(checker, '_rdap_bootstrap_services', {})
+        monkeypatch.setattr(checker, '_rdap_bootstrap_expires_at', 0.0)
+        monkeypatch.setattr(checker.urllib.request, 'urlopen', urlopen)
+
+        result = checker.query_rdap('www.example.co.uk', timeout=4)
+
+        assert result['status'] == 'success'
+        assert result['domain'] == 'www.example.co.uk'
+        assert urlopen.call_args_list[0].args[0].full_url == checker._RDAP_BOOTSTRAP_URL
+        assert urlopen.call_args_list[1].args[0].full_url == (
+            'https://rdap.example.test/uk/domain/example.co.uk'
+        )
+        assert all(call.kwargs['timeout'] == 4 for call in urlopen.call_args_list)
+
+    def test_bootstrap_is_reused_from_cache(self, monkeypatch):
+        from domain_checker import checker
+
+        bootstrap = {'services': [[['test'], ['https://rdap.example.test/']]]}
+        payload = {'ldhName': 'EXAMPLE.TEST', 'status': ['active']}
+        urlopen = mock.Mock(side_effect=[
+            self._response(bootstrap), self._response(payload), self._response(payload),
+        ])
+        monkeypatch.setattr(checker, '_rdap_bootstrap_services', {})
+        monkeypatch.setattr(checker, '_rdap_bootstrap_expires_at', 0.0)
+        monkeypatch.setattr(checker.urllib.request, 'urlopen', urlopen)
+
+        checker.query_rdap('one.test', timeout=2)
+        checker.query_rdap('two.test', timeout=2)
+
+        bootstrap_calls = [
+            call for call in urlopen.call_args_list
+            if call.args[0].full_url == checker._RDAP_BOOTSTRAP_URL
+        ]
+        assert len(bootstrap_calls) == 1
+
+    def test_rdap_failure_falls_back_to_whois_without_loop(self, monkeypatch):
+        from domain_checker import checker
+
+        monkeypatch.setattr(
+            checker, 'query_rdap',
+            mock.Mock(return_value=checker.failed_result('example.com', 'RDAP 请求失败')),
+        )
+        whois_query = mock.Mock(return_value=checker.not_registered_result('example.com'))
+        monkeypatch.setattr(checker, 'query_whois_with_retry', whois_query)
+
+        result = checker.query_rdap_with_whois_fallback(
+            'example.com', query_mode='unlimited', timeout=3,
+        )
+
+        assert result['status'] == 'not_registered'
+        whois_query.assert_called_once_with(
+            'example.com', query_mode='unlimited', timeout=3, allow_rdap_fallback=False,
+        )
+
+    def test_rdap_success_log_does_not_claim_dns_started(self, monkeypatch):
+        import threading
+
+        from domain_checker import checker
+
+        task_id = 'RDAPLOG'
+        result = checker._base_whois_result('held.com', 'success', None)
+        result['whois_status'] = 'client hold'
+        with task_lock:
+            task_storage[task_id] = {'logs': []}
+        monkeypatch.setattr(checker, 'query_rdap', mock.Mock(return_value=result))
+        current_thread = threading.current_thread()
+        previous_task_id = getattr(current_thread, 'task_id', None)
+        current_thread.task_id = task_id
+        try:
+            checker.query_rdap_with_whois_fallback('held.com', timeout=3)
+            with task_lock:
+                messages = [item['message'] for item in task_storage[task_id]['logs']]
+            assert '[held.com] RDAP 查询成功' in messages
+            assert not any('开始检查 DNS' in message for message in messages)
+        finally:
+            if previous_task_id is None:
+                del current_thread.task_id
+            else:
+                current_thread.task_id = previous_task_id
+            with task_lock:
+                task_storage.pop(task_id, None)

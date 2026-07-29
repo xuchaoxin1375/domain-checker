@@ -15,9 +15,13 @@ dependencies = [
     "python-whois>=0.7.3",
     "openpyxl>=3.0.0",
     "dnspython>=2.0.0",
+    "tldextract>=5.1.0",
 ]
 
 [project.optional-dependencies]
+prod = [
+    "gunicorn>=23.0",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.9",

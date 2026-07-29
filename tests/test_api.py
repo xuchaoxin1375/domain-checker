@@ -2,10 +2,11 @@
 
 import json
 import os
+import time
 from datetime import datetime, timedelta
 
 from domain_checker import db
-from domain_checker.state import task_lock, task_storage
+from domain_checker.state import task_lock, task_pause_flags, task_storage
 
 
 class TestConfig:
@@ -54,17 +55,47 @@ class TestConfig:
         assert client.get('/api/config').get_json()['timeout'] == 1
         client.post('/api/config', json={'timeout': original})
 
-    def test_invalid_platform_falls_back_to_whois(self, client):
+    def test_invalid_platform_falls_back_to_rdap(self, client):
         client.post('/api/config', json={'platform': 'nope'})
-        assert client.get('/api/config').get_json()['platform'] == 'whois'
+        assert client.get('/api/config').get_json()['platform'] == 'rdap'
 
     def test_platforms_have_impl_and_desc(self, client):
         platforms = client.get('/api/config').get_json()['platforms']
         assert platforms['whois']['implemented'] is True
         assert platforms['whoisxml']['implemented'] is False
-        assert platforms['rdap']['implemented'] is False
+        assert platforms['rdap']['implemented'] is True
         for p in platforms.values():
             assert p.get('desc'), '每个平台都应带效果与信息介绍'
+
+
+def test_shutdown_endpoint_is_not_exposed(client):
+    assert client.post('/api/shutdown', json={}).status_code == 404
+
+
+class TestOperations:
+    def test_operations_endpoint(self, client, monkeypatch):
+        entries = [{'time': '2026-07-29 10:00:00', 'action': '启动', 'pid': 12, 'detail': 'started'}]
+        monkeypatch.setattr('domain_checker.web.get_operations', lambda limit: entries[:limit])
+
+        resp = client.get('/api/operations?limit=1')
+
+        assert resp.status_code == 200
+        assert resp.get_json()['operations'] == entries
+
+    def test_run_server_records_start_and_stop(self, monkeypatch):
+        from domain_checker import web
+
+        recorded = []
+        monkeypatch.setenv('DOMAIN_CHECKER_HOST', '127.0.0.1')
+        monkeypatch.setenv('DOMAIN_CHECKER_PORT', '5099')
+        monkeypatch.setenv('DOMAIN_CHECKER_DEBUG', '0')
+        monkeypatch.setattr(web, 'record_operation', lambda action, detail: recorded.append((action, detail)))
+        monkeypatch.setattr(web.app, 'run', lambda **_kwargs: None)
+
+        web.run_server()
+
+        assert recorded[0] == ('启动', '服务开始监听 127.0.0.1:5099，debug=False')
+        assert recorded[1] == ('终止', '服务进程已停止')
 
 
 class TestQueryValidation:
@@ -92,6 +123,19 @@ class TestQueryValidation:
             with task_lock:
                 task_storage.pop(data['task_id'], None)
 
+    def test_query_accepts_brief_mode(self, client, monkeypatch):
+        monkeypatch.setattr('domain_checker.web.process_domains_async', lambda *args: None)
+        resp = client.post('/api/query', json={'domains': 'example.com', 'query_mode': 'brief'})
+        data = resp.get_json()
+        try:
+            assert resp.status_code == 200
+            assert data['query_mode'] == 'brief'
+            with task_lock:
+                assert task_storage[data['task_id']]['query_mode'] == 'brief'
+        finally:
+            with task_lock:
+                task_storage.pop(data['task_id'], None)
+
     def test_query_defaults_to_unlimited_and_accepts_task_timeout(self, client, monkeypatch):
         monkeypatch.setattr('domain_checker.web.process_domains_async', lambda domains, task_id: None)
         resp = client.post('/api/query', json={'domains': 'example.com', 'query_timeout': 999})
@@ -104,9 +148,37 @@ class TestQueryValidation:
                 task = task_storage[data['task_id']]
                 assert task['query_mode'] == 'unlimited'
                 assert task['query_timeout'] == 120
+                assert task['results'][0]['query_state'] == 'queued'
+                assert task['results'][0]['domain'] == 'example.com'
         finally:
             with task_lock:
                 task_storage.pop(data['task_id'], None)
+
+    def test_query_timeout_is_clamped_to_lower_bound(self, client, monkeypatch):
+        monkeypatch.setattr('domain_checker.web.process_domains_async', lambda domains, task_id: None)
+        resp = client.post('/api/query', json={'domains': 'example.com', 'query_timeout': 0})
+        data = resp.get_json()
+        try:
+            assert resp.status_code == 200
+            assert data['query_timeout'] == 1
+            with task_lock:
+                assert task_storage[data['task_id']]['query_timeout'] == 1
+        finally:
+            with task_lock:
+                task_storage.pop(data['task_id'], None)
+
+    def test_query_exposes_all_domains_as_queued_in_input_order(self, client, monkeypatch):
+        monkeypatch.setattr('domain_checker.web.process_domains_async', lambda domains, task_id: None)
+        resp = client.post('/api/query', json={'domains': 'b.com\na.com\nc.com'})
+        task_id = resp.get_json()['task_id']
+        try:
+            results = client.get(f'/api/results/{task_id}').get_json()['results']
+            assert [result['domain'] for result in results] == ['b.com', 'a.com', 'c.com']
+            assert [result['query_state'] for result in results] == ['queued', 'queued', 'queued']
+            assert all(result['status'] is None for result in results)
+        finally:
+            with task_lock:
+                task_storage.pop(task_id, None)
 
 
 class TestTaskEndpoints:
@@ -136,6 +208,72 @@ class TestTaskEndpoints:
             with task_lock:
                 task_storage.pop('STATUS01', None)
 
+    def test_elapsed_timer_freezes_while_paused(self, client):
+        started_at = datetime.now() - timedelta(seconds=2)
+        with task_lock:
+            task_storage['PAUSETIMER'] = {
+                'status': 'processing', 'total': 1, 'completed': 0,
+                'results': [], 'logs': [], 'refresh': False,
+                'created_at': started_at.isoformat(), 'completed_at': None,
+                'operation': 'query', 'operation_total': 1, 'operation_completed': 0,
+                'operation_started_at': started_at.isoformat(), 'duration_seconds': None,
+                'paused_duration_seconds': 0.0, '_paused_started_monotonic': None,
+            }
+        try:
+            assert client.post('/api/pause/PAUSETIMER').status_code == 200
+            first = client.get('/api/status/PAUSETIMER').get_json()['elapsed_seconds']
+            time.sleep(0.12)
+            second = client.get('/api/status/PAUSETIMER').get_json()['elapsed_seconds']
+            assert abs(second - first) < 0.05
+
+            assert client.post('/api/resume/PAUSETIMER').status_code == 200
+            time.sleep(0.12)
+            resumed = client.get('/api/status/PAUSETIMER').get_json()['elapsed_seconds']
+            assert resumed >= second + 0.08
+        finally:
+            task_pause_flags.pop('PAUSETIMER', None)
+            with task_lock:
+                task_storage.pop('PAUSETIMER', None)
+
+    def test_pause_resume_and_cancel_update_only_unfinished_rows(self, client):
+        now = datetime.now().isoformat()
+        with task_lock:
+            task_storage['ROWSTATES'] = {
+                'status': 'processing', 'total': 3, 'completed': 1,
+                'results': [
+                    {'domain': 'done.com', 'status': 'success', 'query_state': 'completed'},
+                    {'domain': 'queued.com', 'status': None, 'query_state': 'queued'},
+                    {'domain': 'active.com', 'status': None, 'query_state': 'querying'},
+                ],
+                'logs': [], 'refresh': False,
+                'created_at': now, 'completed_at': None,
+                'operation': 'query', 'operation_total': 3, 'operation_completed': 1,
+                'operation_started_at': now, 'duration_seconds': None,
+                'paused_duration_seconds': 0.0, '_paused_started_monotonic': None,
+            }
+        try:
+            assert client.post('/api/pause/ROWSTATES').status_code == 200
+            paused = client.get('/api/results/ROWSTATES').get_json()['results']
+            assert [result['query_state'] for result in paused] == [
+                'completed', 'paused', 'paused',
+            ]
+
+            assert client.post('/api/resume/ROWSTATES').status_code == 200
+            resumed = client.get('/api/results/ROWSTATES').get_json()['results']
+            assert [result['query_state'] for result in resumed] == [
+                'completed', 'queued', 'querying',
+            ]
+
+            assert client.post('/api/cancel/ROWSTATES').status_code == 200
+            cancelled = client.get('/api/results/ROWSTATES').get_json()['results']
+            assert [result['query_state'] for result in cancelled] == [
+                'completed', 'cancelled', 'cancelled',
+            ]
+        finally:
+            task_pause_flags.pop('ROWSTATES', None)
+            with task_lock:
+                task_storage.pop('ROWSTATES', None)
+
     def test_results_log_cursor_returns_only_new_logs(self, client):
         with task_lock:
             task_storage['LOG01'] = {
@@ -160,7 +298,10 @@ class TestTaskEndpoints:
         with task_lock:
             task_storage['RETRY01'] = {
                 'status': 'completed', 'total': 1, 'completed': 1,
-                'results': [{'domain': 'a.com', 'status': 'failed'}],
+                'results': [{
+                    'domain': 'a.com', 'status': 'failed', 'query_state': 'completed',
+                    'query_time': '2026-07-29 10:00:00', 'query_duration_seconds': 4.25,
+                }],
                 'logs': [], 'refresh': False, 'created_at': now, 'completed_at': now,
             }
         try:
@@ -170,11 +311,17 @@ class TestTaskEndpoints:
             resp = client.post('/api/retry/RETRY01', json={'domains': ['A.COM', 'a.com']})
             assert resp.status_code == 200
             assert resp.get_json()['started'] is True
+            assert resp.get_json()['domains'] == ['a.com']
             status = client.get('/api/status/RETRY01').get_json()
             assert status['status'] == 'processing'
             assert status['operation'] == 'retry'
             assert status['operation_total'] == 1
             assert status['query_mode'] == 'unlimited'
+            with task_lock:
+                result = task_storage['RETRY01']['results'][0]
+                assert result['query_state'] == 'queued'
+                assert result['query_time'] is None
+                assert result['query_duration_seconds'] is None
             assert client.post('/api/retry/RETRY01', json={'domains': ['a.com']}).status_code == 409
         finally:
             with task_lock:
@@ -207,6 +354,43 @@ class TestTaskEndpoints:
             with task_lock:
                 task_storage.pop('RESTORE01', None)
 
+    def test_retry_failed_includes_success_with_unknown_dns(self, client, monkeypatch):
+        retried = []
+        monkeypatch.setattr(
+            'domain_checker.web.retry_domains_async',
+            lambda domains, task_id: retried.extend(domains),
+        )
+        now = datetime.now().isoformat()
+        with task_lock:
+            task_storage['DNSUNKNOWN'] = {
+                'status': 'completed', 'total': 2, 'completed': 2,
+                'results': [
+                    {
+                        'domain': 'unknown.com', 'status': 'success', 'resolved': None,
+                        'query_time': '2026-07-29 10:00:00', 'query_duration_seconds': 8.5,
+                    },
+                    {'domain': 'ok.com', 'status': 'success', 'resolved': True},
+                ],
+                'logs': [], 'refresh': False, 'created_at': now, 'completed_at': now,
+            }
+        try:
+            resp = client.post('/api/retry-failed/DNSUNKNOWN', json={})
+            assert resp.status_code == 200
+            assert resp.get_json()['started'] is True
+            assert resp.get_json()['domains'] == ['unknown.com']
+            with task_lock:
+                result = task_storage['DNSUNKNOWN']['results'][0]
+                assert result['query_time'] is None
+                assert result['query_duration_seconds'] is None
+            for _ in range(20):
+                if retried:
+                    break
+                time.sleep(0.01)
+            assert retried == ['unknown.com']
+        finally:
+            with task_lock:
+                task_storage.pop('DNSUNKNOWN', None)
+
 
 class TestHistory:
     def _seed(self):
@@ -238,6 +422,36 @@ class TestHistory:
     def test_clear(self, client):
         resp = client.post('/api/history/clear', json={'days': 30})
         assert resp.status_code == 200
+
+    def test_batch_delete_selected_history(self, client):
+        for task_id in ['BATCH01', 'BATCH02']:
+            db.save_history(task_id, [f'{task_id.lower()}.com'], 'processing')
+
+        resp = client.post('/api/history/delete-batch', json={'task_ids': ['BATCH01', 'BATCH02']})
+
+        assert resp.status_code == 200
+        assert resp.get_json()['deleted'] == 2
+        assert client.get('/api/history/BATCH01').status_code == 404
+        assert client.get('/api/history/BATCH02').status_code == 404
+
+    def test_batch_delete_validates_selection_and_busy_tasks(self, client):
+        assert client.post('/api/history/delete-batch', json={'task_ids': 'BATCH01'}).status_code == 400
+        assert client.post('/api/history/delete-batch', json={'task_ids': []}).status_code == 400
+        with task_lock:
+            task_storage['BUSY_HISTORY'] = {'status': 'processing'}
+        try:
+            resp = client.post('/api/history/delete-batch', json={'task_ids': ['BUSY_HISTORY']})
+            assert resp.status_code == 409
+        finally:
+            with task_lock:
+                task_storage.pop('BUSY_HISTORY', None)
+
+    def test_clear_all_history(self, client, monkeypatch):
+        monkeypatch.setattr('domain_checker.web.clear_all_history', lambda: 7)
+        assert client.post('/api/history/clear-all').status_code == 415
+        resp = client.post('/api/history/clear-all', json={})
+        assert resp.status_code == 200
+        assert resp.get_json()['deleted'] == 7
 
     def test_export_from_db_fallback(self, client):
         self._seed()

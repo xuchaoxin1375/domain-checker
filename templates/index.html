@@ -107,6 +107,7 @@
         .container { max-width: 1600px; margin: 0 auto; }
         
         .header {
+            position: relative;
             text-align: center;
             color: var(--text-primary);
             margin-bottom: 20px;
@@ -169,8 +170,8 @@
         .preset-btn:hover { color: var(--primary); border-color: var(--primary); }
         .query-mode-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
         .query-mode-label { color: var(--text-secondary); font-size: 12px; }
-        .query-mode-buttons { display: inline-flex; border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; }
-        .query-mode-btn {
+        .query-mode-buttons, .result-display-buttons { display: inline-flex; border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; }
+        .query-mode-btn, .result-display-btn {
             min-height: 28px;
             padding: 4px 11px;
             border: 0;
@@ -180,9 +181,9 @@
             font-size: 12px;
             cursor: pointer;
         }
-        .query-mode-btn:last-child { border-right: 0; }
-        .query-mode-btn:hover { color: var(--primary); }
-        .query-mode-btn.active { background: var(--primary); color: #fff; font-weight: 700; }
+        .query-mode-btn:last-child, .result-display-btn:last-child { border-right: 0; }
+        .query-mode-btn:hover, .result-display-btn:hover { color: var(--primary); }
+        .query-mode-btn.active, .result-display-btn.active { background: var(--primary); color: #fff; font-weight: 700; }
         .query-mode-hint { color: var(--text-secondary); font-size: 11px; }
         .query-timeout-field { display: inline-flex; align-items: center; gap: 5px; color: var(--text-secondary); font-size: 12px; }
         .query-timeout-field input {
@@ -423,7 +424,7 @@
             top: 12px;
             left: 50%;
             z-index: 500;
-            width: min(520px, calc(100vw - 40px));
+            width: min(680px, calc(100vw - 40px));
             margin: 0;
             transform: translateX(-50%);
             box-shadow: 0 8px 28px rgba(0,0,0,0.2);
@@ -451,6 +452,8 @@
         .query-activity-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
         .query-activity-detail { margin-top: 3px; font-size: 12px; color: var(--text-secondary); }
         .query-elapsed { font: 600 13px 'Consolas', 'Monaco', monospace; color: var(--text-primary); white-space: nowrap; }
+        .query-task-controls { display: none; align-items: center; gap: 6px; }
+        .query-task-controls .btn { min-height: 32px; padding: 5px 10px; white-space: nowrap; }
         @keyframes query-spin { to { transform: rotate(360deg); } }
         .progress-bar {
             height: 22px;
@@ -497,7 +500,7 @@
             border-radius: 8px;
             transition: border-color 0.3s;
         }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        table { width: max-content; min-width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
         th {
             background: var(--primary);
             color: white;
@@ -511,7 +514,22 @@
             white-space: nowrap;
             transition: background 0.3s;
         }
+        th .column-resizer {
+            position: absolute;
+            top: 0;
+            right: -3px;
+            width: 7px;
+            height: 100%;
+            cursor: col-resize;
+            touch-action: none;
+            z-index: 12;
+        }
+        th .column-resizer:hover, th.resizing .column-resizer { background: rgba(255,255,255,0.55); }
         th:hover { background: var(--primary-dark); }
+        th[draggable="true"] { cursor: grab; }
+        th.column-dragging { opacity: 0.55; }
+        th.column-drop-before { box-shadow: inset 3px 0 0 #fff; }
+        th.column-drop-after { box-shadow: inset -3px 0 0 #fff; }
         th .sort-icon { margin-left: 5px; opacity: 0.5; font-size: 10px; }
         th.sorted .sort-icon { opacity: 1; }
         
@@ -521,6 +539,7 @@
             vertical-align: middle;
             transition: border-color 0.3s;
         }
+        td.copyable-cell { cursor: copy; overflow: hidden; text-overflow: ellipsis; }
         tr:hover { background: var(--bg-main); }
         
         .checkbox-cell { width: 35px; text-align: center; }
@@ -539,6 +558,21 @@
         .badge-invalid { background: rgba(255,193,7,0.15); color: var(--warning); }
         .badge-blocked { background: rgba(239,68,68,0.15); color: var(--danger); }
         .badge-resolved { background: rgba(40,167,69,0.15); color: var(--success); }
+        .badge-queued { background: var(--bg-main); color: var(--text-secondary); border: 1px solid var(--border-color); }
+        .badge-querying { display: inline-flex; align-items: center; gap: 6px; background: rgba(59,130,246,0.14); color: #2563eb; }
+        .badge-paused { background: rgba(245,158,11,0.18); color: var(--warning); }
+        .badge-cancelled { background: rgba(107,114,128,0.16); color: var(--text-secondary); }
+        .badge-querying::before {
+            content: '';
+            width: 10px;
+            height: 10px;
+            flex: 0 0 10px;
+            border: 2px solid currentColor;
+            border-right-color: transparent;
+            border-radius: 50%;
+            animation: query-spin 0.75s linear infinite;
+        }
+        .badge-registered { background: rgba(40,167,69,0.15); color: var(--success); }
         
         .error-text { color: var(--danger); font-size: 11px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .domain-cell-wrap { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -611,14 +645,30 @@
             line-height: 1.5;
             border: 1px solid #333333;
         }
-        .log-line { display: grid; grid-template-columns: 72px 54px minmax(0, 1fr); gap: 8px; padding: 3px 12px; }
+        .log-toolbar { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .log-toolbar select { padding: 6px 10px; font-size: 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-card); color: var(--text-primary); }
+        .log-action-button { width: 32px; height: 30px; padding: 0; display: inline-grid; place-items: center; }
+        .log-line { display: grid; grid-template-columns: 42px 72px 54px minmax(0, 1fr); gap: 8px; padding: 3px 12px; }
         .log-line:hover { background: #2a2d2e; }
+        .log-number { color: #6e7681; text-align: right; user-select: none; border-right: 1px solid #343434; padding-right: 8px; }
         .log-time { color: #858585; }
         .log-level { font-size: 10px; font-weight: 700; text-transform: uppercase; }
         .log-info .log-level { color: #4fc1ff; }
         .log-warn .log-level { color: #cca700; }
         .log-error .log-level { color: #f48771; }
         .log-message { color: #cccccc; overflow-wrap: anywhere; }
+        #logCard:fullscreen, #logCard.log-card-fullscreen {
+            background: var(--bg-card);
+            border-radius: 0;
+            padding: 18px;
+            margin: 0;
+            display: flex !important;
+            flex-direction: column;
+            width: 100vw;
+            height: 100vh;
+        }
+        #logCard.log-card-fullscreen { position: fixed; inset: 0; z-index: 3000; }
+        #logCard:fullscreen .log-container, #logCard.log-card-fullscreen .log-container { flex: 1; max-height: none; min-height: 0; }
         
         /* 导出选项 */
         .export-bar {
@@ -687,6 +737,68 @@
         .history-stats .success { color: var(--success); }
         .history-stats .failed { color: var(--danger); }
         .history-actions { display: flex; gap: 8px; }
+        .history-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 14px;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-main);
+        }
+        .history-select-all { display: inline-flex; align-items: center; gap: 7px; color: var(--text-primary); font-size: 13px; }
+        .history-selection-count { color: var(--text-secondary); font-size: 12px; }
+        .history-clear-all { margin-left: auto; }
+        .history-checkbox { flex: 0 0 24px; text-align: center; }
+
+        /* 使用说明 */
+        .usage-page {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 24px;
+        }
+        .usage-page h2 { margin-bottom: 8px; font-size: 1.25rem; }
+        .usage-intro { color: var(--text-secondary); line-height: 1.6; }
+        .usage-section { padding: 22px 0; border-bottom: 1px solid var(--border-color); }
+        .usage-section:last-child { border-bottom: 0; padding-bottom: 0; }
+        .usage-section h3 { margin-bottom: 10px; font-size: 1rem; }
+        .usage-section p, .usage-section li { color: var(--text-secondary); line-height: 1.65; }
+        .usage-section ol { padding-left: 22px; }
+        .usage-platforms { display: block; }
+        .usage-platform { padding: 18px 0; }
+        .usage-platform + .usage-platform { border-top: 1px dashed var(--border-color); }
+        .usage-platform h4 { margin-bottom: 8px; font-size: 0.9rem; }
+        .usage-command-step { margin-top: 14px; }
+        .usage-command-step h5 { margin-bottom: 5px; color: var(--text-primary); font-size: 0.8rem; }
+        .usage-platform pre {
+            margin: 8px 0;
+            padding: 10px 12px;
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            background: var(--bg-main);
+            color: var(--text-primary);
+            font: 12px/1.55 'Consolas', 'Monaco', monospace;
+            user-select: text;
+        }
+        .usage-service-status { margin: 12px 0; color: var(--text-secondary); font-size: 13px; }
+        .operation-log-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+        .operation-log-header h3 { margin-bottom: 0; }
+        .operation-log { margin-top: 10px; border-top: 1px solid var(--border-color); }
+        .operation-log-row {
+            display: grid;
+            grid-template-columns: 155px 56px 75px minmax(0, 1fr);
+            gap: 10px;
+            padding: 9px 0;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+        .operation-log-action { color: var(--text-primary); font-weight: 700; }
+        .operation-log-empty { padding: 14px 0; color: var(--text-secondary); font-size: 12px; }
         
         /* Tab切换 */
         .tabs {
@@ -954,7 +1066,7 @@
             .header-version { margin-left: 5px; white-space: nowrap; }
             .sidebar-menu-button { width: 38px; height: 38px; flex-basis: 38px; }
             .tabs { gap: 0; }
-            .tab { flex: 1 1 50%; padding: 11px 8px; text-align: center; }
+            .tab { flex: 1 1 25%; padding: 11px 6px; text-align: center; }
             .card { padding: 14px; border-radius: 8px; }
             .config-grid { grid-template-columns: 1fr; }
             .config-item { justify-content: space-between; }
@@ -967,6 +1079,7 @@
             .query-activity.processing { top: 72px; width: calc(100vw - 20px); }
             .query-activity { align-items: flex-start; flex-wrap: wrap; }
             .query-elapsed { margin-left: 34px; }
+            .query-task-controls { width: calc(100% - 34px); margin-left: 34px; justify-content: flex-end; }
             .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
             .stat-item { min-width: 0; padding: 9px 8px; }
             .result-filter-field, .result-filter-field select { width: 100%; }
@@ -976,6 +1089,10 @@
             .history-stats { justify-content: space-between; }
             .history-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
             .history-actions .btn { padding-inline: 6px; }
+            .history-clear-all { margin-left: 0; }
+            .usage-page { padding: 16px; }
+            .operation-log-row { grid-template-columns: 1fr auto; }
+            .operation-log-detail { grid-column: 1 / -1; }
             .toast-container { top: 64px; right: 12px; left: 12px; }
             .toast { width: 100%; }
         }
@@ -993,6 +1110,8 @@
         <div class="tabs">
             <button class="tab active" data-tab="query" onclick="switchTab('query')">📝 查询</button>
             <button class="tab" data-tab="history" onclick="switchTab('history')">📚 历史记录</button>
+            <button class="tab" data-tab="operations" onclick="switchTab('operations')">操作日志</button>
+            <button class="tab" data-tab="usage" onclick="switchTab('usage')">使用说明</button>
         </div>
         
         <!-- 查询页面 -->
@@ -1016,7 +1135,7 @@
                     <div class="config-item"><label>限流(秒):</label><input type="number" id="cfgRateLimit" step="0.1" min="0.1" value="1.0"></div>
                     <div class="config-item"><label>重试:</label><input type="number" id="cfgRetries" min="1" max="10" value="3"></div>
                     <div class="config-item"><label>并发:</label><input type="number" id="cfgWorkers" min="1" max="10" value="5"></div>
-                    <div class="config-item"><label>默认超时(秒):</label><input type="number" id="cfgTimeout" min="1" max="120" value="15" onchange="syncQueryTimeoutFromDefault()" title="新查询默认使用的单阶段超时时间"></div>
+                    <div class="config-item"><label>默认单次超时(秒):</label><input type="number" id="cfgTimeout" min="1" max="120" value="15" onchange="syncQueryTimeoutFromDefault()" title="每次 WHOIS、RDAP、DNS 或 HTTP 请求的超时；重试会累计总耗时"></div>
                     <div class="config-item"><label>单批上限:</label><input type="number" id="cfgMaxBatch" min="10" max="1000" value="500"></div>
                 </div>
                 
@@ -1024,9 +1143,9 @@
                 <div class="platform-section">
                     <label>查询平台:</label>
                     <div class="platform-buttons">
-                        <button class="platform-btn active" data-platform="whois" onclick="setPlatform('whois')">🔍 WHOIS标准</button>
+                        <button class="platform-btn" data-platform="whois" onclick="setPlatform('whois')">🔍 WHOIS标准</button>
                         <button class="platform-btn" data-platform="whoisxml" onclick="setPlatform('whoisxml')">🌐 WHOIS XML</button>
-                        <button class="platform-btn" data-platform="rdap" onclick="setPlatform('rdap')">🛡️ RDAP安全</button>
+                        <button class="platform-btn active" data-platform="rdap" onclick="setPlatform('rdap')">🛡️ RDAP优先</button>
                     </div>
                     <span id="platformHint" style="font-size: 12px; color: var(--warning); display: none; width: 100%;"></span>
                     <!-- 各平台效果与信息介绍（由 JS 渲染，与下方 platforms 定义保持同步） -->
@@ -1064,7 +1183,7 @@
                 <div class="preset-bar">
                     <span class="preset-label">演示预设</span>
                     <button type="button" class="preset-btn" onclick="fillDomainPreset('popular')">知名网站</button>
-                    <button type="button" class="preset-btn" onclick="fillDomainPreset('mixed'); setQueryMode('quick')">混合演示（快速）</button>
+                    <button type="button" class="preset-btn" onclick="fillDomainPreset('mixed'); setQueryMode('unlimited')">混合演示</button>
                     <button type="button" class="preset-btn" onclick="fillDomainPreset('urls')">URL 示例</button>
                 </div>
                 <div class="query-mode-bar" aria-label="查询模式">
@@ -1073,10 +1192,17 @@
                         <button type="button" class="query-mode-btn active" data-query-mode="unlimited" onclick="setQueryMode('unlimited')">不限流</button>
                         <button type="button" class="query-mode-btn" data-query-mode="standard" onclick="setQueryMode('standard')">标准</button>
                         <button type="button" class="query-mode-btn" data-query-mode="quick" onclick="setQueryMode('quick')">快速</button>
+                        <button type="button" class="query-mode-btn" data-query-mode="brief" onclick="setQueryMode('brief')">简略快速</button>
                     </div>
-                    <label class="query-timeout-field" for="queryTimeout">本次超时
-                        <input type="number" id="queryTimeout" min="1" max="120" value="15" title="仅用于本次查询和随后重查，不修改默认配置">秒
+                    <span class="query-mode-label">结果展示</span>
+                    <div class="result-display-buttons" role="group" aria-label="结果展示模式选择">
+                        <button type="button" class="result-display-btn active" data-result-display-mode="live" onclick="setResultDisplayMode('live')">状态刷新</button>
+                        <button type="button" class="result-display-btn" data-result-display-mode="progressive" onclick="setResultDisplayMode('progressive')">逐条加入</button>
+                    </div>
+                    <label class="query-timeout-field" for="queryTimeout" title="每次网络请求的超时；WHOIS 重试、RDAP 回退、DNS 复查和 HTTP 探测会累计总耗时">单次请求超时
+                        <input type="number" id="queryTimeout" min="1" max="120" value="15">秒
                     </label>
+                    <span class="query-mode-hint">每次网络请求；重试会累计总耗时</span>
                     <span class="query-mode-hint" id="queryModeHint">不添加主动请求间隔</span>
                 </div>
                 <div class="domain-editor">
@@ -1090,8 +1216,6 @@ https://www.example.com/path/to/page"></textarea>
                 
                 <div class="btn-group">
                     <button class="btn btn-primary" id="btnQuery" onclick="startQuery()">🔍 开始查询</button>
-                    <button class="btn btn-warning" id="btnPause" onclick="togglePause()" style="display: none;">⏸ 暂停</button>
-                    <button class="btn btn-danger" id="btnCancel" onclick="cancelTask()" style="display: none;">⏹ 取消</button>
                     <button class="btn btn-secondary" onclick="clearAll()">🗑 清空</button>
                 </div>
                 
@@ -1104,12 +1228,16 @@ https://www.example.com/path/to/page"></textarea>
             <div class="card" id="logCard" style="display: none;">
                 <h2 class="card-title">
                     📜 运行日志
-                    <select id="logLevelFilter" onchange="changeLogLevel()" style="margin-left: auto; padding: 6px 10px; font-size: 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-card); color: var(--text-primary);">
-                        <option value="all">全部</option>
-                        <option value="info">信息</option>
-                        <option value="warn">警告</option>
-                        <option value="error">错误</option>
-                    </select>
+                    <span class="log-toolbar">
+                        <select id="logLevelFilter" onchange="changeLogLevel()" aria-label="日志级别">
+                            <option value="all">全部</option>
+                            <option value="info">信息</option>
+                            <option value="warn">警告</option>
+                            <option value="error">错误</option>
+                        </select>
+                        <button type="button" class="btn btn-sm btn-secondary log-action-button" onclick="copyRunLogs()" title="复制当前日志" aria-label="复制当前日志">⧉</button>
+                        <button type="button" class="btn btn-sm btn-secondary log-action-button" id="logFullscreenButton" onclick="toggleLogFullscreen()" title="全屏查看日志" aria-label="全屏查看日志">⛶</button>
+                    </span>
                 </h2>
                 <div class="log-container" id="logContainer"></div>
             </div>
@@ -1122,13 +1250,17 @@ https://www.example.com/path/to/page"></textarea>
                 </h2>
 
                 <div class="progress-section" id="progressSection">
-                    <div class="query-activity" id="queryActivity" role="status" aria-live="polite">
+                    <div class="query-activity" id="queryActivity">
                         <div class="query-spinner" aria-hidden="true"></div>
-                        <div class="query-activity-main">
+                        <div class="query-activity-main" role="status" aria-live="polite">
                             <div class="query-activity-title" id="queryActivityTitle">准备查询</div>
                             <div class="query-activity-detail" id="queryActivityDetail">正在提交任务...</div>
                         </div>
-                        <div class="query-elapsed" id="queryElapsed">00:00.0</div>
+                        <div class="query-elapsed" id="queryElapsed"></div>
+                        <div class="query-task-controls" id="queryTaskControls" aria-label="查询任务控制">
+                            <button class="btn btn-sm btn-warning" id="btnPause" onclick="togglePause()">⏸ 暂停</button>
+                            <button class="btn btn-sm btn-danger" id="btnCancel" onclick="cancelTask()">⏹ 终止</button>
+                        </div>
                     </div>
                     <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width: 0%">0%</div></div>
                 </div>
@@ -1171,7 +1303,7 @@ https://www.example.com/path/to/page"></textarea>
                 
                 <div class="export-bar">
                     <button class="btn btn-sm btn-success retry-action-btn" onclick="retrySelected()" id="btnRetrySel">🔄 重新查询选中</button>
-                    <button class="btn btn-sm btn-warning retry-action-btn" onclick="retryFailed()" id="btnRetryFail">🔄 重新查询失败</button>
+                    <button class="btn btn-sm btn-warning retry-action-btn" onclick="retryFailed()" id="btnRetryFail">🔄 重新查询异常/未知</button>
                     <span style="font-size: 12px; color: var(--text-secondary);">已选 <span id="selectionCount">0</span> 项</span>
                     
                     <span style="margin-left: 15px;">格式:</span>
@@ -1195,21 +1327,40 @@ https://www.example.com/path/to/page"></textarea>
                 
                 <div class="table-container">
                     <table id="resultsTable">
+                        <colgroup>
+                            <col data-column="select" style="width: 48px">
+                            <col data-column="domain" style="width: 300px">
+                            <col data-column="query_time" style="width: 155px">
+                            <col data-column="query_duration_seconds" style="width: 95px">
+                            <col data-column="query_state" style="width: 150px">
+                            <col data-column="status" style="width: 110px">
+                            <col data-column="resolved" style="width: 180px">
+                            <col data-column="whois_status" style="width: 190px">
+                            <col data-column="registrar" style="width: 180px">
+                            <col data-column="contact_email" style="width: 240px">
+                            <col data-column="registration_date" style="width: 110px">
+                            <col data-column="expiration_date" style="width: 110px">
+                            <col data-column="name_servers" style="width: 220px">
+                            <col data-column="error" style="width: 180px">
+                        </colgroup>
                         <thead>
                             <tr>
-                                <th class="checkbox-cell">
+                                <th class="checkbox-cell" data-column="select">
                                     <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()">
                                 </th>
-                                <th data-sort="domain" onclick="sortTable('domain')">域名<span class="sort-icon">⇅</span></th>
-                                <th data-sort="query_time" onclick="sortTable('query_time')">查询时间<span class="sort-icon">⇅</span></th>
-                                <th data-sort="query_duration_seconds" onclick="sortTable('query_duration_seconds')">查询耗时<span class="sort-icon">⇅</span></th>
-                                <th data-sort="status" onclick="sortTable('status')">状态<span class="sort-icon">⇅</span></th>
-                                <th data-sort="registrar" onclick="sortTable('registrar')">注册商<span class="sort-icon">⇅</span></th>
-                                <th data-sort="registration_date" onclick="sortTable('registration_date')">注册日期<span class="sort-icon">⇅</span></th>
-                                <th data-sort="expiration_date" onclick="sortTable('expiration_date')">过期日期<span class="sort-icon">⇅</span></th>
-                                <th data-sort="name_servers" onclick="sortTable('name_servers')">DNS服务器<span class="sort-icon">⇅</span></th>
-                                <th data-sort="resolved" onclick="sortTable('resolved')">解析<span class="sort-icon">⇅</span></th>
-                                <th data-sort="error" onclick="sortTable('error')">备注<span class="sort-icon">⇅</span></th>
+                                <th data-column="domain" data-sort="domain" onclick="sortTable('domain')">域名<span class="sort-icon">⇅</span></th>
+                                <th data-column="query_time" data-sort="query_time" onclick="sortTable('query_time')">查询时间<span class="sort-icon">⇅</span></th>
+                                <th data-column="query_duration_seconds" data-sort="query_duration_seconds" onclick="sortTable('query_duration_seconds')">查询耗时<span class="sort-icon">⇅</span></th>
+                                <th data-column="query_state" data-sort="query_state" onclick="sortTable('query_state')">状态<span class="sort-icon">⇅</span></th>
+                                <th data-column="status" data-sort="status" onclick="sortTable('status')">注册状态<span class="sort-icon">⇅</span></th>
+                                <th data-column="resolved" data-sort="resolved" onclick="sortTable('resolved')">解析<span class="sort-icon">⇅</span></th>
+                                <th data-column="whois_status" data-sort="whois_status" onclick="sortTable('whois_status')">域名状态<span class="sort-icon">⇅</span></th>
+                                <th data-column="registrar" data-sort="registrar" onclick="sortTable('registrar')">注册商<span class="sort-icon">⇅</span></th>
+                                <th data-column="contact_email" data-sort="contact_email" onclick="sortTable('contact_email')">联系邮箱<span class="sort-icon">⇅</span></th>
+                                <th data-column="registration_date" data-sort="registration_date" onclick="sortTable('registration_date')">注册日期<span class="sort-icon">⇅</span></th>
+                                <th data-column="expiration_date" data-sort="expiration_date" onclick="sortTable('expiration_date')">过期日期<span class="sort-icon">⇅</span></th>
+                                <th data-column="name_servers" data-sort="name_servers" onclick="sortTable('name_servers')">DNS服务器<span class="sort-icon">⇅</span></th>
+                                <th data-column="error" data-sort="error" onclick="sortTable('error')">备注<span class="sort-icon">⇅</span></th>
                             </tr>
                         </thead>
                         <tbody id="resultsBody"></tbody>
@@ -1221,14 +1372,96 @@ https://www.example.com/path/to/page"></textarea>
         <!-- 历史记录页面 -->
         <div id="tabHistory" class="hidden">
             <div class="card">
-                <h2 class="card-title">
-                    📚 查询历史
-                    <button class="btn btn-sm btn-danger" onclick="clearHistory()" style="margin-left: auto;">🗑 清理30天前</button>
-                </h2>
+                <h2 class="card-title">📚 查询历史</h2>
+                <div class="history-toolbar">
+                    <label class="history-select-all" for="historySelectAll">
+                        <input type="checkbox" id="historySelectAll" onchange="toggleAllHistorySelection()"> 全选
+                    </label>
+                    <span class="history-selection-count">已选 <span id="historySelectionCount">0</span> 条</span>
+                    <button type="button" class="btn btn-sm btn-danger" id="deleteSelectedHistoryButton"
+                            onclick="deleteSelectedHistory()" disabled>删除选中</button>
+                    <button type="button" class="btn btn-sm btn-danger history-clear-all" onclick="clearAllHistory()">清理全部</button>
+                </div>
                 <div id="historyList">
                     <div style="text-align: center; padding: 40px; color: var(--text-secondary);">加载中...</div>
                 </div>
             </div>
+        </div>
+
+        <!-- 使用说明页面 -->
+        <div id="tabUsage" class="hidden">
+            <main class="usage-page">
+                <h2>使用说明</h2>
+                <p class="usage-intro">查询操作、服务器部署、服务关闭，以及不同系统上的端口与进程排查方法。</p>
+
+                <section class="usage-section">
+                    <h3>域名查询</h3>
+                    <ol>
+                        <li>在“查询”页输入域名或 URL，每行一个。</li>
+                        <li>选择查询模式和超时时间后开始查询；运行期间可暂停、继续或取消。</li>
+                        <li>结果展示可在“状态刷新”和“逐条加入”之间即时切换；“未知（建议重查）”可使用“重新查询异常/未知”。</li>
+                        <li>拖动表头分隔线调整列宽；点击普通单元格复制内容。</li>
+                    </ol>
+                </section>
+
+                <section class="usage-section">
+                    <h3>服务器部署</h3>
+                    <p>生产环境推荐使用 Nginx + Gunicorn + systemd：Nginx 提供 HTTPS 与访问认证，Gunicorn 仅监听 127.0.0.1:5000。</p>
+                    <p>当前任务状态保存在进程内存中，Gunicorn 必须保持单 worker；不要启用多 worker、多实例或把 5000 端口直接暴露到公网。</p>
+                    <p>Python 环境推荐使用 uv 管理项目内的 .venv；本项目不依赖 Conda 二进制生态，无需额外安装 Miniforge。</p>
+                    <p>宝塔用户只让面板管理 Nginx、域名和证书，Gunicorn 仍交给 systemd；不要同时通过宝塔 Python 项目与 systemd 启动。</p>
+                    <p>应用没有登录权限系统，公网入口至少启用 Nginx Basic Auth。宝塔开启反向代理后需确认访问限制仍实际生效。完整步骤见 <code>docs/DEPLOYMENT_NGINX.md</code>。</p>
+                </section>
+
+                <section class="usage-section">
+                    <h3>关闭当前服务</h3>
+                    <p>网页不提供关闭服务入口。请回到启动服务的终端按 Ctrl+C，或使用下方对应系统的进程管理命令。</p>
+                    <div class="usage-service-status" id="usageServiceStatus">正在读取服务状态...</div>
+                </section>
+
+                <section class="usage-section">
+                    <h3>命令行排查与停止</h3>
+                    <p>前台运行时优先回到启动服务的终端按 Ctrl+C。若终端已丢失，可按系统查找监听 5000 端口的进程。</p>
+                    <div class="usage-platforms">
+                        <div class="usage-platform">
+                            <h4>Windows PowerShell</h4>
+                            <div class="usage-command-step"><h5>1. 查询端口</h5><pre>Get-NetTCPConnection -LocalPort 5000 -State Listen</pre></div>
+                            <div class="usage-command-step"><h5>2. 确认进程</h5><pre>Get-Process -Id &lt;PID&gt;</pre></div>
+                            <div class="usage-command-step"><h5>3. 停止服务</h5><pre>Stop-Process -Id &lt;PID&gt;</pre></div>
+                            <div class="usage-command-step"><h5>旧版 Windows 查询</h5><pre>netstat -ano | findstr :5000</pre></div>
+                            <div class="usage-command-step"><h5>旧版 Windows 停止</h5><pre>taskkill /PID &lt;PID&gt;</pre></div>
+                        </div>
+                        <div class="usage-platform">
+                            <h4>macOS</h4>
+                            <div class="usage-command-step"><h5>1. 查询端口</h5><pre>lsof -nP -iTCP:5000 -sTCP:LISTEN</pre></div>
+                            <div class="usage-command-step"><h5>2. 确认进程</h5><pre>ps -p &lt;PID&gt; -o pid,command</pre></div>
+                            <div class="usage-command-step"><h5>3. 正常停止</h5><pre>kill &lt;PID&gt;</pre></div>
+                            <div class="usage-command-step"><h5>4. 强制停止（仅在无响应时）</h5><pre>kill -9 &lt;PID&gt;</pre></div>
+                        </div>
+                        <div class="usage-platform">
+                            <h4>Linux</h4>
+                            <div class="usage-command-step"><h5>1. 查询端口</h5><pre>ss -ltnp 'sport = :5000'</pre></div>
+                            <div class="usage-command-step"><h5>2. 确认进程</h5><pre>ps -p &lt;PID&gt; -o pid,cmd</pre></div>
+                            <div class="usage-command-step"><h5>3. 正常停止</h5><pre>kill &lt;PID&gt;</pre></div>
+                            <div class="usage-command-step"><h5>备用端口查询</h5><pre>lsof -nP -iTCP:5000 -sTCP:LISTEN</pre></div>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <!-- 操作日志页面 -->
+        <div id="tabOperations" class="hidden">
+            <main class="usage-page">
+                <div class="operation-log-header">
+                    <div>
+                        <h2>服务操作日志</h2>
+                        <p class="usage-intro">记录服务启动与正常退出，按时间倒序显示。</p>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="loadOperationLogs()" title="刷新服务操作日志">↻ 刷新</button>
+                </div>
+                <div class="operation-log" id="operationLog"><div class="operation-log-empty">正在加载...</div></div>
+            </main>
         </div>
     </div>
     
@@ -1260,6 +1493,8 @@ https://www.example.com/path/to/page"></textarea>
         <button class="outline-item" data-section="logCard" data-conditional="true" onclick="scrollToSection('logCard')" title="运行日志" hidden><span class="outline-icon">›_</span><span class="outline-label">运行日志</span></button>
         <button class="outline-item" data-section="resultsCard" data-conditional="true" onclick="scrollToSection('resultsCard')" title="查询结果" hidden><span class="outline-icon">▦</span><span class="outline-label">查询结果</span></button>
         <button class="outline-item" data-section="history" onclick="switchTab('history')" title="历史记录"><span class="outline-icon">◷</span><span class="outline-label">历史记录</span></button>
+        <button class="outline-item" data-section="operations" onclick="switchTab('operations')" title="操作日志"><span class="outline-icon">≡</span><span class="outline-label">操作日志</span></button>
+        <button class="outline-item" data-section="usage" onclick="switchTab('usage')" title="使用说明"><span class="outline-icon">?</span><span class="outline-label">使用说明</span></button>
     </aside>
     
     <script>
@@ -1268,18 +1503,27 @@ https://www.example.com/path/to/page"></textarea>
         let isPaused = false;
         let currentResults = [];
         let selectedDomains = new Set();
+        let selectedHistoryTasks = new Set();
         let lastLogCursor = 0;
         let currentLogLevel = 'all';
         let currentTab = 'query';
-        let currentPlatform = 'whois';
+        let currentPlatform = 'rdap';
         let currentTheme = 'light';
         let isTaskBusy = false;
         let pollInFlight = false;
         let currentOperation = 'query';
         let currentQueryMode = 'unlimited';
+        let currentResultDisplayMode = 'live';
         
         // 排序状态
         let sortState = { column: null, ascending: true };
+        let suppressColumnSort = false;
+        let draggedColumnKey = null;
+        const defaultResultColumnOrder = [
+            'select', 'domain', 'query_time', 'query_duration_seconds', 'query_state',
+            'status', 'resolved', 'whois_status', 'registrar', 'contact_email',
+            'registration_date', 'expiration_date', 'name_servers', 'error'
+        ];
         
         // 平台信息（implemented=false 的平台未接入专用接口，实际自动使用 WHOIS 标准协议）
         const platforms = {
@@ -1287,8 +1531,8 @@ https://www.example.com/path/to/page"></textarea>
                      desc: '使用标准 WHOIS 协议（43端口）直连注册局，信息全面：注册商、注册/过期/更新日期、DNS服务器、DNSSEC' },
             whoisxml: { name: 'WHOIS XML', icon: '🌐', implemented: false,
                         desc: '第三方 WHOIS XML API（whoisxmlapi.com，需 API 密钥），数据结构化、稳定。暂未接入，当前自动使用 WHOIS 标准协议' },
-            rdap: { name: 'RDAP安全查询', icon: '🛡️', implemented: false,
-                    desc: '基于 HTTPS 的注册数据访问协议（RFC 7480），返回结构化 JSON、更安全。暂未接入，当前自动使用 WHOIS 标准协议' }
+            rdap: { name: 'RDAP优先查询', icon: '🛡️', implemented: true,
+                    desc: '通过 IANA 自动发现权威 RDAP 服务，使用 HTTPS 获取结构化注册数据；服务不可用时自动回退 WHOIS' }
         };
 
         const domainPresets = {
@@ -1321,7 +1565,7 @@ https://www.example.com/path/to/page"></textarea>
         }
 
         function setQueryMode(mode) {
-            currentQueryMode = ['unlimited', 'standard', 'quick'].includes(mode) ? mode : 'unlimited';
+            currentQueryMode = ['unlimited', 'standard', 'quick', 'brief'].includes(mode) ? mode : 'unlimited';
             document.querySelectorAll('.query-mode-btn').forEach(button => {
                 button.classList.toggle('active', button.dataset.queryMode === currentQueryMode);
             });
@@ -1331,9 +1575,19 @@ https://www.example.com/path/to/page"></textarea>
                     unlimited: '不添加主动请求间隔，仍受并发、超时和重试次数约束',
                     standard: '按默认限流和重试等待策略查询',
                     quick: '缩短 WHOIS 等待，适合演示与小批量排查',
+                    brief: '单轮注册状态查询（RDAP 必要时回退一次 WHOIS）和一次 DNS 检查，不做 HTTP 探测或自动复查',
                 };
                 hint.textContent = hints[currentQueryMode];
             }
+        }
+
+        function setResultDisplayMode(mode) {
+            currentResultDisplayMode = mode === 'progressive' ? 'progressive' : 'live';
+            document.querySelectorAll('.result-display-btn').forEach(button => {
+                button.classList.toggle('active', button.dataset.resultDisplayMode === currentResultDisplayMode);
+            });
+            localStorage.setItem('domainCheckerResultDisplayMode', currentResultDisplayMode);
+            if (currentResults.length) renderResults();
         }
 
         function queryTimeoutValue() {
@@ -1442,9 +1696,17 @@ https://www.example.com/path/to/page"></textarea>
             });
             document.getElementById('tabQuery').classList.toggle('hidden', tab !== 'query');
             document.getElementById('tabHistory').classList.toggle('hidden', tab !== 'history');
+            document.getElementById('tabUsage').classList.toggle('hidden', tab !== 'usage');
+            document.getElementById('tabOperations').classList.toggle('hidden', tab !== 'operations');
             if (tab === 'history') {
                 setOutlineActive('history');
                 loadHistory();
+            } else if (tab === 'usage') {
+                setOutlineActive('usage');
+                loadServiceStatus();
+            } else if (tab === 'operations') {
+                setOutlineActive('operations');
+                loadOperationLogs();
             }
             syncOutlineVisibility();
             setMobileSidebarOpen(false);
@@ -1452,6 +1714,7 @@ https://www.example.com/path/to/page"></textarea>
         
         // 表格排序
         function sortTable(column) {
+            if (suppressColumnSort) return;
             // 切换排序方向
             if (sortState.column === column) {
                 sortState.ascending = !sortState.ascending;
@@ -1544,15 +1807,50 @@ https://www.example.com/path/to/page"></textarea>
         // 显示服务器当前实际监听状态
         function updateLanStatus(config) {
             const el = document.getElementById('lanStatus');
-            if (!el) return;
+            const usageStatus = document.getElementById('usageServiceStatus');
             if (config.server && config.server.bind_host) {
                 const mode = config.server.lan_active ? '局域网可访问' : '仅本机可访问';
-                el.textContent = `当前监听 ${config.server.bind_host}:${config.server.port}（${mode}）`;
+                const status = `当前监听 ${config.server.bind_host}:${config.server.port}（${mode}）`;
+                if (el) el.textContent = status;
+                if (usageStatus) usageStatus.textContent = status;
             } else {
-                el.textContent = '';
+                if (el) el.textContent = '';
+                if (usageStatus) usageStatus.textContent = '无法读取服务监听状态';
             }
         }
-        
+
+        async function loadServiceStatus() {
+            try {
+                const resp = await fetch('/api/config');
+                updateLanStatus(await resp.json());
+            } catch (error) {
+                document.getElementById('usageServiceStatus').textContent = '无法读取服务监听状态';
+            }
+        }
+
+        async function loadOperationLogs() {
+            const container = document.getElementById('operationLog');
+            try {
+                const resp = await fetch('/api/operations?limit=100');
+                const data = await resp.json();
+                const operations = data.operations || [];
+                if (!operations.length) {
+                    container.innerHTML = '<div class="operation-log-empty">暂无启动或终止记录</div>';
+                    return;
+                }
+                container.innerHTML = operations.map(item => `
+                    <div class="operation-log-row">
+                        <span>${escapeHtml(item.time || '-')}</span>
+                        <span class="operation-log-action">${escapeHtml(item.action || '-')}</span>
+                        <span>PID ${escapeHtml(item.pid ?? '-')}</span>
+                        <span class="operation-log-detail">${escapeHtml(item.detail || '-')}</span>
+                    </div>
+                `).join('');
+            } catch (error) {
+                container.innerHTML = '<div class="operation-log-empty">操作日志加载失败</div>';
+            }
+        }
+
         // 查询
         async function startQuery() {
             const domainsText = document.getElementById('domains').value.trim();
@@ -1613,7 +1911,7 @@ https://www.example.com/path/to/page"></textarea>
                 if (resp.ok) {
                     isPaused = !isPaused;
                     updatePauseButton();
-                    showToast(isPaused ? '已暂停' : '已继续', 'info');
+                    showToast(isPaused ? '已请求暂停，当前网络请求完成后生效' : '已继续', 'info');
                 }
             } catch (e) { showToast('操作失败', 'error'); }
         }
@@ -1639,8 +1937,9 @@ https://www.example.com/path/to/page"></textarea>
         }
 
         function formatResultDuration(seconds) {
+            if (seconds === null || seconds === undefined || seconds === '') return '';
             const value = Number(seconds);
-            return Number.isFinite(value) ? `${value.toFixed(2)} 秒` : '-';
+            return Number.isFinite(value) ? `${value.toFixed(2)} 秒` : '';
         }
 
         function updateQueryActivity(state, operation, elapsed, completed, total, customTitle = '') {
@@ -1661,8 +1960,7 @@ https://www.example.com/path/to/page"></textarea>
             isTaskBusy = busy;
             document.body.setAttribute('aria-busy', busy ? 'true' : 'false');
             document.getElementById('btnQuery').disabled = busy;
-            document.getElementById('btnPause').style.display = busy ? 'inline-flex' : 'none';
-            document.getElementById('btnCancel').style.display = busy ? 'inline-flex' : 'none';
+            document.getElementById('queryTaskControls').style.display = busy ? 'flex' : 'none';
             updateSelectionInfo();
         }
 
@@ -1745,20 +2043,66 @@ https://www.example.com/path/to/page"></textarea>
             const container = document.getElementById('logContainer');
             logs.forEach(log => {
                 const line = document.createElement('div');
+                const lineNumber = container.querySelectorAll('.log-line').length + 1;
                 const level = log.level === 'error' ? 'error' : (log.level === 'warn' ? 'warn' : 'info');
                 const levelText = level === 'error' ? '错误' : (level === 'warn' ? '警告' : '信息');
                 line.className = `log-line log-${level}`;
-                line.innerHTML = `<span class="log-time">${log.time}</span><span class="log-level">${levelText}</span><span class="log-message">${escapeHtml(log.message)}</span>`;
+                line.dataset.copyText = `${lineNumber}\t${log.time}\t${levelText}\t${log.message}`;
+                line.innerHTML = `<span class="log-number">${lineNumber}</span><span class="log-time">${log.time}</span><span class="log-level">${levelText}</span><span class="log-message">${escapeHtml(log.message)}</span>`;
                 container.appendChild(line);
             });
             container.scrollTop = container.scrollHeight;
         }
+
+        async function copyRunLogs() {
+            const text = Array.from(document.querySelectorAll('#logContainer .log-line'))
+                .map(line => line.dataset.copyText || line.textContent.trim())
+                .join('\n');
+            if (!text) {
+                showToast('暂无可复制的运行日志', 'info');
+                return;
+            }
+            let copied = false;
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(text);
+                    copied = true;
+                } else {
+                    copied = fallbackCopyText(text);
+                }
+            } catch (error) {
+                copied = fallbackCopyText(text);
+            }
+            showToast(copied ? '运行日志已复制' : '复制失败，请手动复制', copied ? 'success' : 'error');
+        }
+
+        async function toggleLogFullscreen() {
+            const card = document.getElementById('logCard');
+            if (document.fullscreenElement === card) {
+                await document.exitFullscreen();
+            } else if (card.requestFullscreen) {
+                await card.requestFullscreen();
+            } else {
+                card.classList.toggle('log-card-fullscreen');
+                updateLogFullscreenButton(card.classList.contains('log-card-fullscreen'));
+            }
+        }
+
+        function updateLogFullscreenButton(active = document.fullscreenElement === document.getElementById('logCard')) {
+            const button = document.getElementById('logFullscreenButton');
+            button.textContent = active ? '×' : '⛶';
+            button.title = active ? '退出全屏' : '全屏查看日志';
+            button.setAttribute('aria-label', button.title);
+        }
+
+        document.addEventListener('fullscreenchange', () => updateLogFullscreenButton());
 
         function isHeldResult(result) {
             return Boolean(result.hold_status || (result.block_reason || '').includes('停止解析（域名被封）'));
         }
 
         function resolutionFilterValue(result) {
+            if ((result.query_state || 'completed') !== 'completed') return 'pending';
             if (result.status === 'not_registered' || result.status === 'invalid') return 'not_applicable';
             if (result.resolved === true) return 'resolved';
             if (result.resolved === false) return isHeldResult(result) ? 'held' : 'unresolved';
@@ -1769,6 +2113,8 @@ https://www.example.com/path/to/page"></textarea>
             const statusFilter = document.getElementById('statusFilter')?.value || 'all';
             const resolutionFilter = document.getElementById('resolutionFilter')?.value || 'all';
             return currentResults.filter(result =>
+                (currentResultDisplayMode === 'live' ||
+                    (result.status !== null && result.status !== undefined)) &&
                 (statusFilter === 'all' || result.status === statusFilter) &&
                 (resolutionFilter === 'all' || resolutionFilterValue(result) === resolutionFilter)
             );
@@ -1797,18 +2143,26 @@ https://www.example.com/path/to/page"></textarea>
                 tr.dataset.domain = r.domain;
                 
                 const failure = resultFailureReason(r);
-                let statusBadge = r.status === 'success' ? '<span class="badge badge-success">✓ 成功</span>' :
-                                  r.status === 'not_registered' ? '<span class="badge badge-invalid">未注册</span>' :
-                                  r.status === 'timeout' ? '<span class="badge badge-timeout">⏱ 超时</span>' :
-                                  r.status === 'failed' ? `<span class="badge badge-failed">✗ ${escapeHtml(failure)}</span>` :
+                const queryState = r.query_state || 'completed';
+                const pending = queryState !== 'completed';
+                let statusBadge = queryState === 'queued' ? '<span class="badge badge-queued">排队中</span>' :
+                                  queryState === 'querying' ? '<span class="badge badge-querying">正在查询</span>' :
+                                  queryState === 'paused' ? '<span class="badge badge-paused">已暂停</span>' :
+                                  queryState === 'cancelled' ? '<span class="badge badge-cancelled">已终止</span>' :
+                                  r.status === 'success' || r.status === 'not_registered' ? '<span class="badge badge-success">✓ 查询成功</span>' :
+                                  r.status === 'timeout' ? '<span class="badge badge-timeout">⏱ 查询超时</span>' :
+                                  r.status === 'failed' ? `<span class="badge badge-failed">✗ 查询失败 · ${escapeHtml(failure)}</span>` :
                                   '<span class="badge badge-invalid">无效</span>';
-                const whoisStatus = r.whois_status
-                    ? `<small class="whois-status" title="WHOIS 原始状态：${escapeHtml(r.whois_status)}">${escapeHtml(r.whois_status)}</small>`
-                    : '';
-                statusBadge += whoisStatus;
-                
+                const registrationText = resultRegistrationText(r);
+                const registrationBadge = r.status === 'success'
+                    ? `<span class="badge badge-registered">${registrationText}</span>`
+                    : r.status === 'not_registered'
+                        ? `<span class="badge badge-invalid">${registrationText}</span>`
+                        : `<span class="badge badge-queued">${registrationText}</span>`;
                 let resolvedBadge = '';
-                if (r.resolved === true) {
+                if (pending) {
+                    resolvedBadge = '<span class="badge badge-queued">待查询</span>';
+                } else if (r.resolved === true) {
                     resolvedBadge = '<span class="badge badge-resolved">正常</span>';
                 } else if (r.resolved === false) {
                     const held = isHeldResult(r);
@@ -1820,31 +2174,53 @@ https://www.example.com/path/to/page"></textarea>
                     resolvedBadge = '<span class="badge badge-invalid">不适用</span>';
                 } else {
                     // resolved === null：WHOIS/DNS 超时等不确定状态，展示真实原因
-                    resolvedBadge = '<span class="badge badge-invalid">未知</span>';
+                    resolvedBadge = '<span class="badge badge-timeout">未知（建议重查）</span>';
                     const reason = r.block_reason || r.error;
                     if (reason) resolvedBadge += `<br><small class="error-text" title="${escapeHtml(reason)}">${escapeHtml(reason)}</small>`;
                 }
                 
                 const checked = selectedDomains.has(r.domain) ? 'checked' : '';
+                const pendingDisabled = pending ? 'disabled' : '';
                 
                 tr.innerHTML = `
-                    <td class="checkbox-cell"><input type="checkbox" ${checked} onchange="toggleSelect('${escapeHtml(r.domain)}')"></td>
-                    <td><span class="domain-cell-wrap"><a class="domain-cell" href="https://${escapeHtml(r.domain)}" target="_blank" rel="noopener noreferrer" title="打开网站">${escapeHtml(r.domain)}</a><button type="button" class="retry-domain-btn" onclick="retrySingle('${escapeHtml(r.domain)}')" title="重新查询此域名" aria-label="重新查询此域名">↻ 重查</button><button type="button" class="detail-result-btn" onclick="showResultDetails('${escapeHtml(r.domain)}')" title="查看详细结果" aria-label="查看 ${escapeHtml(r.domain)} 的详细结果">详细结果</button><button type="button" class="copy-domain-btn" onclick="copyDomain(this, '${escapeHtml(r.domain)}')" title="复制域名" aria-label="复制域名 ${escapeHtml(r.domain)}">⧉</button></span></td>
-                    <td class="query-time-cell">${escapeHtml(r.query_time || '-')}</td>
-                    <td class="query-time-cell">${formatResultDuration(r.query_duration_seconds)}</td>
-                    <td>${statusBadge}</td>
-                    <td>${escapeHtml(r.registrar || '-')}</td>
-                    <td>${r.registration_date || '-'}</td>
-                    <td>${r.expiration_date || '-'}</td>
-                    <td><small title="${escapeHtml(r.name_servers || '')}">${escapeHtml(r.name_servers ? (r.name_servers.length > 30 ? r.name_servers.slice(0,30) + '...' : r.name_servers) : '-')}</small></td>
-                    <td>${resolvedBadge}</td>
-                    <td><small class="error-text" title="${escapeHtml(r.error || '')}">${escapeHtml(r.error || '')}</small></td>
+                    <td class="checkbox-cell" data-column="select"><input type="checkbox" ${checked} ${pendingDisabled} onchange="toggleSelect('${escapeHtml(r.domain)}')"></td>
+                    <td data-column="domain"><span class="domain-cell-wrap"><a class="domain-cell" href="https://${escapeHtml(r.domain)}" target="_blank" rel="noopener noreferrer" title="打开网站">${escapeHtml(r.domain)}</a><button type="button" class="retry-domain-btn" ${pendingDisabled} onclick="retrySingle('${escapeHtml(r.domain)}')" title="重新查询此域名" aria-label="重新查询此域名">↻ 重查</button><button type="button" class="detail-result-btn" onclick="showResultDetails('${escapeHtml(r.domain)}')" title="查看详细结果" aria-label="查看 ${escapeHtml(r.domain)} 的详细结果">详细结果</button><button type="button" class="copy-domain-btn" onclick="copyDomain(this, '${escapeHtml(r.domain)}')" title="复制域名" aria-label="复制域名 ${escapeHtml(r.domain)}">⧉</button></span></td>
+                    <td class="query-time-cell" data-column="query_time">${escapeHtml(r.query_time || '')}</td>
+                    <td class="query-time-cell" data-column="query_duration_seconds">${formatResultDuration(r.query_duration_seconds)}</td>
+                    <td data-column="query_state">${statusBadge}</td>
+                    <td data-column="status">${registrationBadge}</td>
+                    <td data-column="resolved">${resolvedBadge}</td>
+                    <td data-column="whois_status"><small class="whois-status" title="${escapeHtml(r.whois_status || '')}">${escapeHtml(r.whois_status || '-')}</small></td>
+                    <td data-column="registrar">${escapeHtml(r.registrar || '-')}</td>
+                    <td data-column="contact_email">${escapeHtml(r.contact_email || '-')}</td>
+                    <td data-column="registration_date">${r.registration_date || '-'}</td>
+                    <td data-column="expiration_date">${r.expiration_date || '-'}</td>
+                    <td data-column="name_servers"><small title="${escapeHtml(r.name_servers || '')}">${escapeHtml(r.name_servers ? (r.name_servers.length > 30 ? r.name_servers.slice(0,30) + '...' : r.name_servers) : '-')}</small></td>
+                    <td data-column="error"><small class="error-text" title="${escapeHtml(r.error || '')}">${escapeHtml(r.error || '')}</small></td>
                 `;
+
+                const copyValues = [
+                    r.domain, r.query_time, formatResultDuration(r.query_duration_seconds),
+                    resultStatusText(r), resultRegistrationText(r), resultResolutionText(r),
+                    r.whois_status, r.registrar, r.contact_email,
+                    r.registration_date, r.expiration_date, r.name_servers, r.error,
+                ];
+                tr.querySelectorAll('td:not(.checkbox-cell)').forEach((cell, index) => {
+                    const value = detailValue(copyValues[index]);
+                    cell.classList.add('copyable-cell');
+                    cell.title = cell.title || '点击复制单元格内容';
+                    cell.addEventListener('click', event => copyTableCell(event, value));
+                });
                 
                 tbody.appendChild(tr);
             });
+
+            applyColumnOrder(loadColumnOrder());
             
-            updateStats(currentResults);
+            const statsResults = currentResultDisplayMode === 'progressive'
+                ? currentResults.filter(result => result.status !== null && result.status !== undefined)
+                : currentResults;
+            updateStats(statsResults);
             const visibleCount = document.getElementById('visibleResultCount');
             if (visibleCount) visibleCount.textContent = `显示 ${visibleResults.length}/${currentResults.length}`;
             updateSelectionInfo();
@@ -1899,6 +2275,22 @@ https://www.example.com/path/to/page"></textarea>
             }, 1200);
         }
 
+        async function copyTableCell(event, value) {
+            if (event.target.closest('a, button, input, select') || value === '-') return;
+            let copied = false;
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(value);
+                    copied = true;
+                } else {
+                    copied = fallbackCopyText(value);
+                }
+            } catch (e) {
+                copied = fallbackCopyText(value);
+            }
+            showToast(copied ? `已复制: ${value}` : '复制失败，请手动复制', copied ? 'success' : 'error');
+        }
+
         function detailValue(value) {
             if (Array.isArray(value)) value = value.join(', ');
             if (value === null || value === undefined || value === '') return '-';
@@ -1906,11 +2298,22 @@ https://www.example.com/path/to/page"></textarea>
         }
 
         function resultStatusText(result) {
-            if (result.status === 'success') return '查询成功';
-            if (result.status === 'not_registered') return '未注册';
+            if (result.query_state === 'queued') return '排队中';
+            if (result.query_state === 'querying') return '正在查询';
+            if (result.query_state === 'paused') return '已暂停';
+            if (result.query_state === 'cancelled') return '已终止';
+            if (result.status === 'success' || result.status === 'not_registered') return '查询成功';
             if (result.status === 'timeout') return '查询超时';
             if (result.status === 'failed') return `查询失败 · ${resultFailureReason(result)}`;
             return '格式无效';
+        }
+
+        function resultRegistrationText(result) {
+            if (result.status === 'success') return '已注册';
+            if (result.status === 'not_registered') return '未注册';
+            if ((result.query_state || 'completed') !== 'completed') return '待确认';
+            if (result.status === 'invalid') return '不适用';
+            return '无法确认';
         }
 
         function resultFailureReason(result) {
@@ -1926,6 +2329,7 @@ https://www.example.com/path/to/page"></textarea>
         }
 
         function resultResolutionText(result) {
+            if ((result.query_state || 'completed') !== 'completed') return '待查询';
             if (result.status === 'not_registered' || result.status === 'invalid') return '不适用';
             if (result.resolved === true) return '正常解析';
             if (result.resolved === false) {
@@ -1958,10 +2362,12 @@ https://www.example.com/path/to/page"></textarea>
             document.getElementById('detailSummary').textContent = resultJudgement(result);
             const fields = [
                 ['查询状态', resultStatusText(result)],
+                ['注册状态', resultRegistrationText(result)],
                 ['解析结果', resultResolutionText(result)],
-                ['WHOIS 原始状态', result.whois_status],
+                ['域名状态', result.whois_status],
                 ['停止解析状态', result.hold_status],
                 ['注册商', result.registrar],
+                ['联系邮箱', result.contact_email],
                 ['注册日期', result.registration_date],
                 ['过期日期', result.expiration_date],
                 ['更新时间', result.updated_date],
@@ -2005,7 +2411,10 @@ https://www.example.com/path/to/page"></textarea>
             document.getElementById('statNotRegistered').textContent = notRegistered;
             document.getElementById('statBlocked').textContent = blocked;
             document.getElementById('statNormal').textContent = normal;
-            const retryable = results.filter(r => ['failed', 'timeout', 'invalid'].includes(r.status)).length;
+            const retryable = results.filter(r =>
+                ['failed', 'timeout', 'invalid'].includes(r.status) ||
+                (r.status === 'success' && r.resolved === null)
+            ).length;
             document.getElementById('btnRetryFail').disabled = retryable === 0;
         }
         
@@ -2016,8 +2425,10 @@ https://www.example.com/path/to/page"></textarea>
         }
         
         function selectAll() {
-            currentResults.forEach(r => selectedDomains.add(r.domain));
-            document.querySelectorAll('#resultsBody input[type="checkbox"]').forEach(cb => cb.checked = true);
+            currentResults
+                .filter(r => (r.query_state || 'completed') === 'completed')
+                .forEach(r => selectedDomains.add(r.domain));
+            document.querySelectorAll('#resultsBody input[type="checkbox"]:not(:disabled)').forEach(cb => cb.checked = true);
             updateSelectionInfo();
         }
         
@@ -2035,7 +2446,11 @@ https://www.example.com/path/to/page"></textarea>
         function updateSelectionInfo() {
             document.getElementById('selectionCount').textContent = selectedDomains.size;
             document.getElementById('btnRetrySel').disabled = isTaskBusy || selectedDomains.size === 0;
-            document.getElementById('btnRetryFail').disabled = isTaskBusy;
+            const retryable = currentResults.some(r =>
+                ['failed', 'timeout', 'invalid'].includes(r.status) ||
+                (r.status === 'success' && r.resolved === null)
+            );
+            document.getElementById('btnRetryFail').disabled = isTaskBusy || !retryable;
         }
 
         async function beginRetry(url, options = {}) {
@@ -2055,6 +2470,7 @@ https://www.example.com/path/to/page"></textarea>
                 if (!resp.ok) throw new Error(data.error || '重新查询提交失败');
                 showToast(data.message, 'info');
                 if (data.started) {
+                    markDomainsQueuedForRetry(data.domains || []);
                     startPolling();
                 } else {
                     updateQueryActivity('completed', 'retry', 0, 0, 0, data.message);
@@ -2065,6 +2481,18 @@ https://www.example.com/path/to/page"></textarea>
                 setTaskBusy(false);
                 showToast(e.message, 'error');
             }
+        }
+
+        function markDomainsQueuedForRetry(domains) {
+            const domainSet = new Set(domains);
+            currentResults.forEach(result => {
+                if (domainSet.has(result.domain)) {
+                    result.query_state = 'queued';
+                    result.query_time = null;
+                    result.query_duration_seconds = null;
+                }
+            });
+            renderResults();
         }
 
         // 重试
@@ -2111,9 +2539,23 @@ https://www.example.com/path/to/page"></textarea>
             window.location.href = `/api/export/${currentTaskId}?format=${format}&filter=${filter}`;
         }
         
+        function markUnfinishedQueryState(queryState) {
+            currentResults.forEach(result => {
+                if ((result.query_state || 'completed') !== 'completed') {
+                    result.query_state = queryState;
+                }
+            });
+            renderResults();
+        }
+
         async function cancelTask() {
-            if (!currentTaskId) return;
-            await fetch(`/api/cancel/${currentTaskId}`, { method: 'POST' });
+            if (!currentTaskId || !confirm('确定终止当前查询？尚未开始的域名将不再查询。')) return;
+            const response = await fetch(`/api/cancel/${currentTaskId}`, { method: 'POST' });
+            if (!response.ok) {
+                showToast('终止任务失败', 'error');
+                return;
+            }
+            markUnfinishedQueryState('cancelled');
             updateQueryActivity('cancelled', currentOperation, 0, 0, 0, '任务已取消');
             stopPolling();
             showToast('任务已取消');
@@ -2148,9 +2590,16 @@ https://www.example.com/path/to/page"></textarea>
                 const list = document.getElementById('historyList');
                 
                 if (!data.history || data.history.length === 0) {
+                    selectedHistoryTasks.clear();
                     list.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-secondary);">暂无历史记录</div>';
+                    updateHistorySelectionInfo();
                     return;
                 }
+
+                const availableIds = new Set(data.history.map(item => item.task_id));
+                selectedHistoryTasks = new Set(
+                    Array.from(selectedHistoryTasks).filter(taskId => availableIds.has(taskId))
+                );
                 
                 list.innerHTML = data.history.map(h => {
                     const date = new Date(h.created_at).toLocaleString('zh-CN');
@@ -2158,7 +2607,12 @@ https://www.example.com/path/to/page"></textarea>
                     const domainsShort = domains.length > 60 ? domains.slice(0, 60) + '...' : domains;
                     
                     return `
-                        <div class="history-item">
+                        <div class="history-item" data-task-id="${h.task_id}">
+                            <div class="history-checkbox">
+                                <input type="checkbox" ${selectedHistoryTasks.has(h.task_id) ? 'checked' : ''}
+                                       onchange="toggleHistorySelection('${h.task_id}', this.checked)"
+                                       aria-label="选择历史任务 ${h.task_id}">
+                            </div>
                             <div class="history-info">
                                 <div class="history-domain" title="${escapeHtml(h.domains)}">${domainsShort}</div>
                                 <div class="history-meta">${date} · 共 ${h.domain_count} 个域名</div>
@@ -2170,12 +2624,42 @@ https://www.example.com/path/to/page"></textarea>
                             <div class="history-actions">
                                 <button class="btn btn-sm btn-primary" onclick="loadHistoryDetail('${h.task_id}')">查看</button>
                                 <button class="btn btn-sm btn-success" onclick="exportHistory('${h.task_id}')">导出</button>
-                                <button class="btn btn-sm btn-danger" onclick="deleteHistory('${h.task_id}')">删除</button>
                             </div>
                         </div>
                     `;
                 }).join('');
+                updateHistorySelectionInfo();
             } catch (e) { console.error('加载历史失败', e); }
+        }
+
+        function toggleHistorySelection(taskId, checked) {
+            if (checked) selectedHistoryTasks.add(taskId);
+            else selectedHistoryTasks.delete(taskId);
+            updateHistorySelectionInfo();
+        }
+
+        function toggleAllHistorySelection() {
+            const checked = document.getElementById('historySelectAll').checked;
+            document.querySelectorAll('#historyList input[type="checkbox"]').forEach(input => {
+                input.checked = checked;
+                const item = input.closest('.history-item');
+                const taskId = item?.dataset.taskId;
+                if (taskId) {
+                    if (checked) selectedHistoryTasks.add(taskId);
+                    else selectedHistoryTasks.delete(taskId);
+                }
+            });
+            updateHistorySelectionInfo();
+        }
+
+        function updateHistorySelectionInfo() {
+            const checkboxes = Array.from(document.querySelectorAll('#historyList input[type="checkbox"]'));
+            const selectedVisible = checkboxes.filter(input => input.checked).length;
+            const selectAll = document.getElementById('historySelectAll');
+            selectAll.checked = checkboxes.length > 0 && selectedVisible === checkboxes.length;
+            selectAll.indeterminate = selectedVisible > 0 && selectedVisible < checkboxes.length;
+            document.getElementById('historySelectionCount').textContent = selectedHistoryTasks.size;
+            document.getElementById('deleteSelectedHistoryButton').disabled = selectedHistoryTasks.size === 0;
         }
         
         async function loadHistoryDetail(taskId) {
@@ -2189,7 +2673,8 @@ https://www.example.com/path/to/page"></textarea>
                 }
                 
                 const results = data.results.map(r => ({
-                    domain: r.domain, status: r.status, registrar: r.registrar,
+                    domain: r.domain, query_state: 'completed', status: r.status, registrar: r.registrar,
+                    contact_email: r.contact_email,
                     whois_status: r.whois_status, hold_status: r.hold_status,
                     registration_date: r.registration_date, expiration_date: r.expiration_date,
                     updated_date: r.updated_date, name_servers: r.name_servers, dnssec: r.dnssec,
@@ -2218,22 +2703,34 @@ https://www.example.com/path/to/page"></textarea>
             window.location.href = `/api/export/${taskId}?format=csv`;
         }
         
-        async function deleteHistory(taskId) {
-            if (!confirm('确定删除这条记录?')) return;
+        async function deleteSelectedHistory() {
+            const taskIds = Array.from(selectedHistoryTasks);
+            if (!taskIds.length || !confirm(`确定删除选中的 ${taskIds.length} 条历史记录？此操作无法恢复。`)) return;
             try {
-                await fetch(`/api/history/${taskId}`, { method: 'DELETE' });
-                showToast('已删除');
-                loadHistory();
-            } catch (e) { showToast('删除失败', 'error'); }
+                const resp = await fetch('/api/history/delete-batch', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({task_ids: taskIds})
+                });
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data.error || '批量删除失败');
+                selectedHistoryTasks.clear();
+                showToast(data.message);
+                await loadHistory();
+            } catch (error) { showToast(error.message, 'error'); }
         }
         
-        async function clearHistory() {
-            if (!confirm('确定清理30天前的记录?')) return;
+        async function clearAllHistory() {
+            if (!confirm('确定清理全部查询历史和明细？此操作无法恢复。')) return;
             try {
-                await fetch('/api/history/clear', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ days: 30 }) });
-                showToast('已清理');
-                loadHistory();
-            } catch (e) { showToast('清理失败', 'error'); }
+                const resp = await fetch('/api/history/clear-all', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+                });
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data.error || '清理全部失败');
+                selectedHistoryTasks.clear();
+                showToast(data.message);
+                await loadHistory();
+            } catch (error) { showToast(error.message, 'error'); }
         }
         
         function escapeHtml(text) {
@@ -2339,8 +2836,150 @@ https://www.example.com/path/to/page"></textarea>
             window.matchMedia('(max-width: 1250px)').addEventListener('change', () => setMobileSidebarOpen(false));
         }
 
+        function loadColumnOrder() {
+            let saved = [];
+            try {
+                const value = JSON.parse(localStorage.getItem('domainCheckerColumnOrder') || '[]');
+                if (Array.isArray(value)) saved = value;
+            } catch (error) {
+                localStorage.removeItem('domainCheckerColumnOrder');
+            }
+            const known = new Set(defaultResultColumnOrder);
+            const movable = saved.filter((key, index) =>
+                key !== 'select' && known.has(key) && saved.indexOf(key) === index
+            );
+            defaultResultColumnOrder.forEach(key => {
+                if (key !== 'select' && !movable.includes(key)) movable.push(key);
+            });
+            return ['select', ...movable];
+        }
+
+        function applyColumnOrder(order) {
+            const table = document.getElementById('resultsTable');
+            const colgroup = table.querySelector('colgroup');
+            const headerRow = table.querySelector('thead tr');
+            order.forEach(key => {
+                const col = colgroup.querySelector(`col[data-column="${key}"]`);
+                const header = headerRow.querySelector(`th[data-column="${key}"]`);
+                if (col) colgroup.appendChild(col);
+                if (header) headerRow.appendChild(header);
+                table.querySelectorAll('tbody tr').forEach(row => {
+                    const cell = row.querySelector(`td[data-column="${key}"]`);
+                    if (cell) row.appendChild(cell);
+                });
+            });
+        }
+
+        function initDraggableColumns() {
+            const table = document.getElementById('resultsTable');
+            table.querySelectorAll('thead th[data-column]:not([data-column="select"])').forEach(header => {
+                header.draggable = true;
+                header.title = '点击排序；拖动调整列顺序';
+                header.addEventListener('dragstart', event => {
+                    if (event.target.closest('.column-resizer')) {
+                        event.preventDefault();
+                        return;
+                    }
+                    suppressColumnSort = true;
+                    draggedColumnKey = header.dataset.column;
+                    header.classList.add('column-dragging');
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', header.dataset.column);
+                });
+                header.addEventListener('dragover', event => {
+                    event.preventDefault();
+                    const source = draggedColumnKey;
+                    if (!source || source === header.dataset.column) return;
+                    const after = event.clientX > header.getBoundingClientRect().left + header.offsetWidth / 2;
+                    header.classList.toggle('column-drop-before', !after);
+                    header.classList.toggle('column-drop-after', after);
+                    header.dataset.dropPosition = after ? 'after' : 'before';
+                });
+                header.addEventListener('dragleave', () => {
+                    header.classList.remove('column-drop-before', 'column-drop-after');
+                    delete header.dataset.dropPosition;
+                });
+                header.addEventListener('drop', event => {
+                    event.preventDefault();
+                    const source = draggedColumnKey || event.dataTransfer.getData('text/plain');
+                    const target = header.dataset.column;
+                    if (!source || source === target) return;
+                    const order = loadColumnOrder().filter(key => key !== source);
+                    let targetIndex = order.indexOf(target);
+                    if (header.dataset.dropPosition === 'after') targetIndex += 1;
+                    order.splice(targetIndex, 0, source);
+                    localStorage.setItem('domainCheckerColumnOrder', JSON.stringify(order));
+                    applyColumnOrder(order);
+                });
+                header.addEventListener('dragend', () => {
+                    table.querySelectorAll('thead th').forEach(item => {
+                        item.classList.remove('column-dragging', 'column-drop-before', 'column-drop-after');
+                        delete item.dataset.dropPosition;
+                    });
+                    setTimeout(() => { suppressColumnSort = false; }, 0);
+                    draggedColumnKey = null;
+                });
+            });
+        }
+
+        function initResizableColumns() {
+            const table = document.getElementById('resultsTable');
+            const headers = Array.from(table.querySelectorAll('thead th'));
+            let saved = {};
+            try {
+                const value = JSON.parse(localStorage.getItem('domainCheckerColumnWidths') || '{}');
+                if (value && !Array.isArray(value) && typeof value === 'object') saved = value;
+            } catch (error) {
+                localStorage.removeItem('domainCheckerColumnWidths');
+            }
+            table.querySelectorAll('col[data-column]').forEach(column => {
+                const width = saved[column.dataset.column];
+                if (Number.isFinite(width) && width >= 48) column.style.width = `${width}px`;
+            });
+
+            headers.forEach(header => {
+                const column = table.querySelector(`col[data-column="${header.dataset.column}"]`);
+                const resizer = document.createElement('span');
+                resizer.className = 'column-resizer';
+                resizer.title = '拖动调整列宽，双击恢复默认宽度';
+                resizer.addEventListener('click', event => event.stopPropagation());
+                resizer.addEventListener('dblclick', event => {
+                    event.stopPropagation();
+                    localStorage.removeItem('domainCheckerColumnWidths');
+                    window.location.reload();
+                });
+                resizer.addEventListener('pointerdown', event => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const startX = event.clientX;
+                    const startWidth = column.getBoundingClientRect().width;
+                    header.classList.add('resizing');
+                    const move = moveEvent => {
+                        column.style.width = `${Math.max(48, startWidth + moveEvent.clientX - startX)}px`;
+                    };
+                    const up = () => {
+                        header.classList.remove('resizing');
+                        window.removeEventListener('pointermove', move);
+                        window.removeEventListener('pointerup', up);
+                        const widths = {};
+                        table.querySelectorAll('col[data-column]').forEach(item => {
+                            widths[item.dataset.column] = Math.round(item.getBoundingClientRect().width);
+                        });
+                        localStorage.setItem('domainCheckerColumnWidths', JSON.stringify(widths));
+                    };
+                    window.addEventListener('pointermove', move);
+                    window.addEventListener('pointerup', up, {once: true});
+                });
+                header.appendChild(resizer);
+            });
+        }
+
         document.addEventListener('keydown', event => {
-            if (event.key === 'Escape' && !document.getElementById('detailModal').classList.contains('hidden')) {
+            const logCard = document.getElementById('logCard');
+            if (event.key === 'Escape' && logCard.classList.contains('log-card-fullscreen')) {
+                logCard.classList.remove('log-card-fullscreen');
+                updateLogFullscreenButton(false);
+            } else if (event.key === 'Escape' && !document.getElementById('detailModal').classList.contains('hidden')) {
                 closeResultDetails();
             } else if (event.key === 'Escape') {
                 setMobileSidebarOpen(false);
@@ -2353,7 +2992,11 @@ https://www.example.com/path/to/page"></textarea>
         renderPlatformInfo();
         updateDomainLineNumbers();
         setQueryMode('unlimited');
+        setResultDisplayMode(localStorage.getItem('domainCheckerResultDisplayMode') || 'live');
         initSidebar();
+        applyColumnOrder(loadColumnOrder());
+        initDraggableColumns();
+        initResizableColumns();
     </script>
 </body>
 </html>

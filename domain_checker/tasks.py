@@ -18,9 +18,28 @@ from .settings import (
     normalize_query_mode,
     normalize_timeout,
 )
-from .state import append_task_log, task_lock, task_pause_flags, task_storage
+from .state import (
+    append_task_log,
+    task_lock,
+    task_pause_flags,
+    task_storage,
+    wait_for_task_resume,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def create_queued_result(domain: str) -> dict:
+    """创建表格可立即展示的排队占位结果。"""
+    return {
+        'domain': domain, 'query_state': 'queued', 'status': None,
+        'registrar': None, 'contact_email': None,
+        'registration_date': None, 'expiration_date': None, 'updated_date': None,
+        'name_servers': None, 'dnssec': None, 'whois_status': None, 'hold_status': None,
+        'resolved': None, 'block_reason': None, 'dns_records': None,
+        'error': None, 'raw_response': None, 'query_time': None,
+        'query_duration_seconds': None,
+    }
 
 
 def _worker_config(query_mode: str = 'unlimited', query_timeout: int | None = None) -> dict:
@@ -37,40 +56,54 @@ def _worker_config(query_mode: str = 'unlimited', query_timeout: int | None = No
     if mode_config['rate_limit_delay'] is not None:
         cfg['rate_limit_delay'] = min(cfg['rate_limit_delay'], mode_config['rate_limit_delay'])
         cfg['retry_delay'] = min(cfg['retry_delay'], mode_config['retry_delay'])
+    if mode_config.get('max_retries') is not None:
+        cfg['max_retries'] = min(cfg['max_retries'], int(mode_config['max_retries']))
     return cfg
 
 
-def _task_is_cancelled(task_id: str) -> bool:
-    with task_lock:
-        task = task_storage.get(task_id)
-        return task is None or task['status'] == 'cancelled'
-
-
-def _process_domain_worker(domain: str, task_id: str, query_mode: str = 'unlimited', query_timeout: int | None = None):
+def _process_domain_worker(domain: str, task_id: str, query_mode: str = 'unlimited',
+                           query_timeout: int | None = None, platform: str = 'rdap'):
     """等待任务可运行后处理域名，并把任务 ID 传给深层重试日志。"""
-    while task_pause_flags.get(task_id, False):
-        if _task_is_cancelled(task_id):
-            return None
-        time.sleep(0.2)
-    if _task_is_cancelled(task_id):
+    if not wait_for_task_resume(task_id):
         return None
 
-    threading.current_thread().task_id = task_id
-    return process_single_domain(
-        domain,
-        task_id,
-        query_mode=normalize_query_mode(query_mode),
-        query_timeout=query_timeout,
-    )
+    with task_lock:
+        task = task_storage.get(task_id)
+        if task and task['status'] != 'cancelled':
+            for result in task['results']:
+                if result['domain'] == domain:
+                    result['query_state'] = 'querying'
+                    result['query_time'] = datetime.now().replace(microsecond=0).isoformat(sep=' ')
+                    result['query_duration_seconds'] = None
+                    task['refresh'] = True
+                    break
+
+    current_thread = threading.current_thread()
+    previous_task_id = getattr(current_thread, 'task_id', None)
+    current_thread.task_id = task_id
+    try:
+        return process_single_domain(
+            domain,
+            task_id,
+            query_mode=normalize_query_mode(query_mode),
+            query_timeout=query_timeout,
+            platform=platform,
+        )
+    finally:
+        if previous_task_id is None:
+            del current_thread.task_id
+        else:
+            current_thread.task_id = previous_task_id
 
 
 def _record_worker_failure(domain: str, task_id: str, exc: Exception) -> None:
     """把未预期的 worker 异常收敛为结果，防止整个异步任务永久停滞。"""
     error = f'内部处理异常: {type(exc).__name__}: {str(exc)[:120]}'
     result = {
-        'domain': domain, 'status': 'failed',
+        'domain': domain, 'query_state': 'completed', 'status': 'failed',
         'registrar': None, 'registration_date': None, 'expiration_date': None,
         'updated_date': None, 'name_servers': None, 'dnssec': None,
+        'contact_email': None,
         'whois_status': None, 'hold_status': None,
         'resolved': None, 'block_reason': None, 'dns_records': None,
         'error': error, 'raw_response': None,
@@ -85,6 +118,8 @@ def _record_worker_failure(domain: str, task_id: str, exc: Exception) -> None:
         for index, existing in enumerate(task['results']):
             if existing['domain'] == domain:
                 task['results'][index] = result
+                if task.get('operation') == 'query' and existing.get('query_state') != 'completed':
+                    task['completed'] += 1
                 break
         else:
             task['results'].append(result)
@@ -98,10 +133,12 @@ def _record_worker_failure(domain: str, task_id: str, exc: Exception) -> None:
 
 def _run_pool(domains: list[str], task_id: str, max_workers: int,
               track_operation: bool = False, query_mode: str = 'unlimited',
-              query_timeout: int | None = None) -> None:
+              query_timeout: int | None = None, platform: str = 'rdap') -> None:
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix=f'domain-{task_id}') as executor:
         futures = {
-            executor.submit(_process_domain_worker, domain, task_id, query_mode, query_timeout): domain
+            executor.submit(
+                _process_domain_worker, domain, task_id, query_mode, query_timeout, platform,
+            ): domain
             for domain in domains
         }
         for future in as_completed(futures):
@@ -119,7 +156,7 @@ def _run_pool(domains: list[str], task_id: str, max_workers: int,
 
 
 def _complete_operation(task_id: str, started: float, label: str, work_count: int) -> tuple[list, int, int] | None:
-    duration = round(time.perf_counter() - started, 2)
+    raw_duration = time.perf_counter() - started
     with task_lock:
         task = task_storage.get(task_id)
         if not task or task['status'] == 'cancelled':
@@ -129,6 +166,7 @@ def _complete_operation(task_id: str, started: float, label: str, work_count: in
         results = list(task['results'])
         success_count = sum(1 for result in results if result['status'] == 'success')
         failed_count = len(results) - success_count
+        duration = round(max(0.0, raw_duration - float(task.get('paused_duration_seconds', 0.0))), 2)
         task_pause_flags.pop(task_id, None)
         task['status'] = 'completed'
         task['operation'] = 'completed'
@@ -155,7 +193,8 @@ def process_domains_async(domains: list, task_id: str):
         query_mode = normalize_query_mode(task.get('query_mode', 'unlimited'))
         query_timeout = normalize_timeout(task.get('query_timeout', default_timeout))
     cfg = _worker_config(query_mode, query_timeout)
-    task_pause_flags[task_id] = False
+    # 保留用户在后台线程真正启动前已经发出的暂停请求。
+    task_pause_flags.setdefault(task_id, False)
 
     logger.info(f"[任务{task_id}] 开始处理 {total} 个域名，并发数 {cfg['max_workers']}")
     append_task_log(task_id, 'info', f"任务开始：共 {total} 个域名，并发线程 {cfg['max_workers']}，{QUERY_MODES[query_mode]['name']}")
@@ -166,7 +205,7 @@ def process_domains_async(domains: list, task_id: str):
     )
 
     with task_lock:
-        platform = task_storage[task_id].get('platform', 'whois')
+        platform = task_storage[task_id].get('platform', 'rdap')
     if not is_platform_implemented(platform):
         append_task_log(
             task_id,
@@ -178,6 +217,7 @@ def process_domains_async(domains: list, task_id: str):
     _run_pool(
         domains, task_id, cfg['max_workers'], track_operation=True,
         query_mode=query_mode, query_timeout=query_timeout,
+        platform=platform,
     )
 
     completed = _complete_operation(task_id, started, '查询', len(domains))
@@ -198,12 +238,14 @@ def retry_domains_async(domains: list[str], task_id: str) -> None:
         task = task_storage.get(task_id, {})
         query_mode = normalize_query_mode(task.get('query_mode', 'unlimited'))
         query_timeout = normalize_timeout(task.get('query_timeout', default_timeout))
+        platform = task.get('platform', 'rdap')
     cfg = _worker_config(query_mode, query_timeout)
-    task_pause_flags[task_id] = False
+    task_pause_flags.setdefault(task_id, False)
     append_task_log(task_id, 'info', f"开始重新查询 {len(domains)} 个域名，并发线程 {cfg['max_workers']}，{QUERY_MODES[query_mode]['name']}")
     _run_pool(
         domains, task_id, cfg['max_workers'], track_operation=True,
         query_mode=query_mode, query_timeout=query_timeout,
+        platform=platform,
     )
 
     completed = _complete_operation(task_id, started, '重新查询', len(domains))

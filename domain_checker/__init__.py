@@ -8,6 +8,7 @@
     db        —— SQLite 历史记录读写
     tasks     —— 批量任务的异步编排（线程、暂停/继续）
     export    —— CSV / XLSX 报表导出
+    operations —— 服务启动与终止操作日志
     web       —— Flask 应用与 HTTP API
 """
 

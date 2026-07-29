@@ -12,11 +12,13 @@ logger = logging.getLogger(__name__)
 # 导出的临时文件目录
 EXPORT_DIR = tempfile.gettempdir()
 
-EXPORT_HEADERS = ['域名', '状态', '注册商', '注册日期', '过期日期', '更新时间',
-                  'DNS服务器', 'DNSSEC', '解析状态', 'DNS记录', '解析异常原因', '错误备注']
+EXPORT_HEADERS = ['域名', '查询状态', '注册状态', '域名状态', '注册商', '联系邮箱', '注册日期', '过期日期',
+                  '更新时间', 'DNS服务器', 'DNSSEC', '解析状态', 'DNS记录', '解析异常原因', '错误备注']
 
 STATUS_MAP = {'success': '查询成功', 'failed': '查询失败', 'timeout': '查询超时',
-              'invalid': '格式无效', 'not_registered': '域名未被注册'}
+              'invalid': '格式无效', 'not_registered': '查询成功'}
+REGISTRATION_MAP = {'success': '已注册', 'not_registered': '未注册', 'invalid': '不适用',
+                    'failed': '无法确认', 'timeout': '无法确认'}
 RESOLVED_MAP = {True: '正常解析', False: '未解析', None: '未知'}
 
 
@@ -60,7 +62,9 @@ def create_csv(results: list, timestamp: str) -> str:
 
             writer.writerow([
                 r.get('domain', ''), STATUS_MAP.get(r.get('status', ''), ''),
-                r.get('registrar', ''), r.get('registration_date', ''),
+                REGISTRATION_MAP.get(r.get('status', ''), ''), r.get('whois_status', ''),
+                r.get('registrar', ''), r.get('contact_email', ''),
+                r.get('registration_date', ''),
                 r.get('expiration_date', ''), r.get('updated_date', ''),
                 r.get('name_servers', ''), r.get('dnssec', ''),
                 RESOLVED_MAP.get(r.get('resolved'), ''), dns_records,
@@ -90,7 +94,9 @@ def create_xlsx(results: list, timestamp: str) -> str:
 
         for col, val in enumerate([
             r.get('domain', ''), STATUS_MAP.get(r.get('status', ''), ''),
-            r.get('registrar', ''), r.get('registration_date', ''),
+            REGISTRATION_MAP.get(r.get('status', ''), ''), r.get('whois_status', ''),
+            r.get('registrar', ''), r.get('contact_email', ''),
+            r.get('registration_date', ''),
             r.get('expiration_date', ''), r.get('updated_date', ''),
             r.get('name_servers', ''), r.get('dnssec', ''),
             RESOLVED_MAP.get(r.get('resolved'), ''), dns_records,
@@ -98,7 +104,7 @@ def create_xlsx(results: list, timestamp: str) -> str:
         ], 1):
             ws.cell(row=row_idx, column=col, value=val)
 
-    for i, w in enumerate([30, 12, 20, 12, 12, 12, 35, 15, 12, 25, 25, 35], 1):
+    for i, w in enumerate([30, 12, 12, 24, 20, 30, 12, 12, 12, 35, 15, 12, 25, 25, 35], 1):
         ws.column_dimensions[chr(64 + i) if i <= 26 else 'A' + chr(64 + i - 26)].width = w
 
     filepath = os.path.join(EXPORT_DIR, f'domain_report_{timestamp}.xlsx')

@@ -53,6 +53,7 @@ def init_db():
             whois_status TEXT,
             hold_status TEXT,
             registrar TEXT,
+            contact_email TEXT,
             registration_date TEXT,
             expiration_date TEXT,
             updated_date TEXT,
@@ -79,6 +80,7 @@ def init_db():
         'query_time': 'TEXT',
         'query_duration_seconds': 'REAL',
         'raw_response': 'TEXT',
+        'contact_email': 'TEXT',
     }.items():
         if column not in existing_columns:
             cursor.execute(f'ALTER TABLE query_results ADD COLUMN {column} {definition}')
@@ -145,13 +147,14 @@ def save_results(task_id: str, results: list):
 
         cursor.execute('''
             INSERT INTO query_results
-            (task_id, domain, status, whois_status, hold_status, registrar, registration_date,
+            (task_id, domain, status, whois_status, hold_status, registrar, contact_email, registration_date,
              expiration_date, updated_date, name_servers, dnssec, resolved, block_reason,
              dns_records, error, raw_response, query_time, query_duration_seconds, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             task_id, r.get('domain', ''), r.get('status', ''), r.get('whois_status', ''),
             r.get('hold_status', ''), r.get('registrar', ''),
+            r.get('contact_email', ''),
             r.get('registration_date', ''), r.get('expiration_date', ''), r.get('updated_date', ''),
             r.get('name_servers', ''), r.get('dnssec', ''),
             1 if r.get('resolved') is True else (0 if r.get('resolved') is False else None),
@@ -222,6 +225,34 @@ def delete_history(task_id: str):
     cursor.execute('DELETE FROM query_history WHERE task_id = ?', (task_id,))
     conn.commit()
     conn.close()
+
+
+def delete_histories(task_ids: list[str]) -> int:
+    """在一个事务中删除多条历史及明细，返回实际删除的历史条数。"""
+    unique_ids = list(dict.fromkeys(task_ids))
+    if not unique_ids:
+        return 0
+    placeholders = ','.join('?' for _ in unique_ids)
+    conn = sqlite3.connect(str(settings.DB_PATH))
+    cursor = conn.cursor()
+    cursor.execute(f'DELETE FROM query_results WHERE task_id IN ({placeholders})', unique_ids)
+    cursor.execute(f'DELETE FROM query_history WHERE task_id IN ({placeholders})', unique_ids)
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+def clear_all_history() -> int:
+    """删除全部查询历史及明细，返回删除的历史条数。"""
+    conn = sqlite3.connect(str(settings.DB_PATH))
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM query_results')
+    cursor.execute('DELETE FROM query_history')
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
 
 
 def clear_old_history(days: int = 30) -> int:

@@ -8,16 +8,26 @@ import socket
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 
+import tldextract
 import whois
 
 from .domains import is_valid_domain
 from .settings import CONFIG, QUERY_MODES, config_lock, normalize_query_mode, normalize_timeout
-from .state import append_task_log, task_lock, task_pause_flags, task_storage
+from .state import (
+    append_task_log,
+    get_task_paused_duration,
+    task_lock,
+    task_storage,
+    wait_for_task_resume,
+)
 
 logger = logging.getLogger(__name__)
+
+TASK_CANCELLED_MESSAGE = '任务已取消'
 
 # WHOIS 响应中表示"域名未注册"的常见关键词（小写匹配）。
 # 只有响应文本或明确的 WhoisDomainNotFoundError 命中这些词时，才允许判定未注册。
@@ -35,10 +45,24 @@ WHOIS_TIMEOUT_MESSAGE = 'WHOIS 查询超时，无法确认域名状态'
 WHOIS_EMPTY_RESPONSE_MESSAGE = 'WHOIS 未返回有效数据，无法确认域名状态'
 
 _HOLD_STATUS_KEYS = {'clienthold': 'clientHold', 'serverhold': 'serverHold'}
+# IANA 的引导表负责把顶级域映射到权威 RDAP 服务。静态端点仅用于引导表暂时不可用时
+# 保持原有 .com/.net 容错能力。
+_RDAP_BOOTSTRAP_URL = 'https://data.iana.org/rdap/dns.json'
+_RDAP_BOOTSTRAP_TTL = 24 * 60 * 60
 _RDAP_ENDPOINTS = {
-    'com': 'https://rdap.verisign.com/com/v1/domain/{domain}',
-    'net': 'https://rdap.verisign.com/net/v1/domain/{domain}',
+    'com': 'https://rdap.verisign.com/com/v1/',
+    'net': 'https://rdap.verisign.com/net/v1/',
 }
+_rdap_bootstrap_lock = threading.Lock()
+_rdap_bootstrap_services: dict[str, tuple[str, ...]] = {}
+_rdap_bootstrap_expires_at = 0.0
+_tld_extract = tldextract.TLDExtract(suffix_list_urls=())
+
+
+def _wait_for_current_task() -> bool:
+    """在网络阶段之间响应暂停；非任务线程始终可以继续。"""
+    task_id = getattr(threading.current_thread(), 'task_id', None)
+    return not task_id or wait_for_task_resume(task_id)
 
 
 def is_domain_not_found(exc: Exception) -> bool:
@@ -84,7 +108,7 @@ def has_registration_evidence(whois_data) -> bool:
         return False
     fields = (
         'domain_name', 'registrar', 'creation_date', 'expiration_date',
-        'updated_date', 'name_servers', 'status',
+        'updated_date', 'name_servers', 'status', 'emails', 'email',
     )
     return any(_whois_field(whois_data, field) for field in fields)
 
@@ -109,6 +133,21 @@ def format_whois_status(value) -> str | None:
     return ', '.join(values) if values else None
 
 
+def format_contact_emails(*values) -> str | None:
+    """整理 WHOIS/RDAP 联系邮箱，去重并限制结果长度。"""
+    emails = []
+    for value in values:
+        items = value if isinstance(value, (list, tuple, set)) else [value]
+        for item in items:
+            if item is None:
+                continue
+            for email in re.findall(r'[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}', str(item)):
+                normalized = email.lower()
+                if normalized not in emails:
+                    emails.append(normalized)
+    return ', '.join(emails[:5])[:500] or None
+
+
 def get_hold_statuses(value) -> list[str]:
     """提取会导致域名停止解析的 WHOIS 状态（clientHold/serverHold）。"""
     held = []
@@ -121,11 +160,11 @@ def get_hold_statuses(value) -> list[str]:
 
 
 def _registration_lookup_domain(domain: str) -> str:
-    """返回注册局可查询的域名；当前 RDAP 覆盖的 .com/.net 取主域名。"""
+    """使用内置公共后缀规则返回可注册主域，不在查询时下载后缀数据。"""
     normalized = domain.lower().rstrip('.')
-    labels = normalized.split('.')
-    if len(labels) > 2 and labels[-1] in _RDAP_ENDPOINTS:
-        return '.'.join(labels[-2:])
+    extracted = _tld_extract(normalized)
+    if extracted.domain and extracted.suffix:
+        return f'{extracted.domain}.{extracted.suffix}'
     return normalized
 
 
@@ -135,6 +174,7 @@ def _base_whois_result(domain: str, status: str, error: str | None,
         'domain': domain, 'status': status,
         'registrar': None, 'registration_date': None, 'expiration_date': None,
         'updated_date': None, 'name_servers': None, 'dnssec': None,
+        'contact_email': None,
         'whois_status': None, 'hold_status': None, 'error': error,
         'raw_response': raw_response,
     }
@@ -157,13 +197,17 @@ def failed_result(domain: str, error: str | None, raw_response: str | None = Non
 
 def _whois_success_result(domain: str, whois_data) -> dict:
     """将已确认存在注册证据的 WHOIS 对象整理为统一结果。"""
+    raw_response = _whois_response_text(whois_data) or None
     result = {
         'domain': domain, 'status': 'success',
         'registrar': None, 'registration_date': None, 'expiration_date': None,
         'updated_date': None, 'name_servers': None, 'dnssec': None,
+        'contact_email': format_contact_emails(
+            _whois_field(whois_data, 'emails'), _whois_field(whois_data, 'email'), raw_response,
+        ),
         'whois_status': format_whois_status(_whois_field(whois_data, 'status')),
         'hold_status': None, 'error': None,
-        'raw_response': _whois_response_text(whois_data) or None,
+        'raw_response': raw_response,
     }
 
     registrar = _whois_field(whois_data, 'registrar')
@@ -205,11 +249,32 @@ def _rdap_entity_name(entities) -> str | None:
     return None
 
 
+def _rdap_contact_email(entities) -> str | None:
+    """优先提取 RDAP 投诉邮箱，并兼容嵌套实体。"""
+    prioritized = []
+    others = []
+
+    def collect(items):
+        for entity in items or []:
+            roles = {str(role).lower() for role in entity.get('roles', [])}
+            vcard = entity.get('vcardArray', [])
+            properties = vcard[1] if len(vcard) > 1 and isinstance(vcard[1], list) else []
+            target = prioritized if 'abuse' in roles else others
+            for prop in properties:
+                if len(prop) >= 4 and prop[0] == 'email':
+                    target.append(prop[3])
+            collect(entity.get('entities'))
+
+    collect(entities)
+    return format_contact_emails(prioritized, others)
+
+
 def _rdap_success_result(domain: str, data: dict) -> dict:
     """把标准 RDAP 域名响应整理为现有 WHOIS 结果结构。"""
     result = _base_whois_result(domain, 'success', None)
     result['raw_response'] = json.dumps(data, ensure_ascii=False, indent=2)
     result['registrar'] = _rdap_entity_name(data.get('entities'))
+    result['contact_email'] = _rdap_contact_email(data.get('entities'))
     result['whois_status'] = format_whois_status(data.get('status'))
     result['name_servers'] = ', '.join(
         str(server.get('ldhName', ''))[:30]
@@ -231,20 +296,77 @@ def _rdap_success_result(domain: str, data: dict) -> dict:
     return result
 
 
-def _query_rdap_fallback(domain: str, timeout: float) -> dict | None:
-    """WHOIS 不可用时查询注册局 RDAP；当前覆盖 Verisign 的 .com/.net。"""
+def _parse_rdap_bootstrap(data: dict) -> dict[str, tuple[str, ...]]:
+    """把 IANA bootstrap JSON 整理为 TLD -> RDAP base URL。"""
+    services = {}
+    for entry in data.get('services', []):
+        if not isinstance(entry, list) or len(entry) != 2:
+            continue
+        tlds, base_urls = entry
+        urls = tuple(str(url) for url in base_urls if str(url).startswith('https://'))
+        for tld in tlds:
+            normalized = str(tld).lower().lstrip('.')
+            if normalized and urls:
+                services[normalized] = urls
+    return services
+
+
+def _rdap_services(timeout: float) -> dict[str, tuple[str, ...]]:
+    """读取并缓存 IANA RDAP 引导表；刷新失败时继续使用旧缓存。"""
+    global _rdap_bootstrap_expires_at, _rdap_bootstrap_services
+
+    with _rdap_bootstrap_lock:
+        if _rdap_bootstrap_services and time.monotonic() < _rdap_bootstrap_expires_at:
+            return _rdap_bootstrap_services.copy()
+
+        request = urllib.request.Request(
+            _RDAP_BOOTSTRAP_URL,
+            headers={'Accept': 'application/json', 'User-Agent': 'domain-checker/2.6'},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                parsed = _parse_rdap_bootstrap(json.loads(response.read().decode('utf-8')))
+            if not parsed:
+                raise ValueError('IANA RDAP 引导表为空')
+            _rdap_bootstrap_services = parsed
+            _rdap_bootstrap_expires_at = time.monotonic() + _RDAP_BOOTSTRAP_TTL
+            return parsed.copy()
+        except Exception as exc:
+            logger.warning(f'IANA RDAP 服务发现失败: {str(exc)[:100]}')
+            return _rdap_bootstrap_services.copy()
+
+
+def _rdap_base_url(domain: str, timeout: float) -> str | None:
+    tld = domain.rsplit('.', 1)[-1].lower()
+    urls = _rdap_services(timeout).get(tld)
+    if urls:
+        return urls[0]
+    return _RDAP_ENDPOINTS.get(tld)
+
+
+def query_rdap(domain: str, timeout: float) -> dict | None:
+    """通过 IANA 服务发现查询权威 RDAP；TLD 未提供 RDAP 时返回 None。"""
+    if not _wait_for_current_task():
+        return failed_result(domain, TASK_CANCELLED_MESSAGE)
     lookup_domain = _registration_lookup_domain(domain)
-    tld = lookup_domain.rsplit('.', 1)[-1]
-    endpoint = _RDAP_ENDPOINTS.get(tld)
-    if not endpoint:
+    base_url = _rdap_base_url(lookup_domain, timeout)
+    if not base_url:
         return None
+    if not _wait_for_current_task():
+        return failed_result(domain, TASK_CANCELLED_MESSAGE)
+    endpoint = urllib.parse.urljoin(
+        f'{base_url.rstrip("/")}/',
+        f'domain/{urllib.parse.quote(lookup_domain, safe=".-")}',
+    )
     request = urllib.request.Request(
-        endpoint.format(domain=lookup_domain),
+        endpoint,
         headers={'Accept': 'application/rdap+json', 'User-Agent': 'domain-checker/2.6'},
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             data = json.loads(response.read().decode('utf-8'))
+        if not _wait_for_current_task():
+            return failed_result(domain, TASK_CANCELLED_MESSAGE)
         if not data.get('ldhName') and not data.get('handle'):
             return failed_result(domain, 'RDAP 未返回有效注册数据')
         return _rdap_success_result(domain, data)
@@ -261,7 +383,12 @@ def _query_rdap_fallback(domain: str, timeout: float) -> dict | None:
     except (socket.timeout, TimeoutError):
         return timeout_result(domain, 'RDAP 查询超时，无法确认域名状态')
     except Exception as exc:
-        return failed_result(domain, f'RDAP 回退失败：{str(exc)[:80]}')
+        return failed_result(domain, f'RDAP 查询失败：{str(exc)[:80]}')
+
+
+def _query_rdap_fallback(domain: str, timeout: float) -> dict | None:
+    """兼容原有调用点：WHOIS 不可用时执行通用 RDAP 查询。"""
+    return query_rdap(domain, timeout)
 
 
 def get_proxies() -> dict:
@@ -277,7 +404,8 @@ def get_proxies() -> dict:
     return proxies
 
 
-def check_domain_resolved(domain: str, timeout: float | None = None) -> dict:
+def check_domain_resolved(domain: str, timeout: float | None = None, attempts: int = 2,
+                          check_http: bool = True) -> dict:
     """检查域名当前是否有DNS解析。
 
     本函数仅在WHOIS查询成功（域名已注册）后调用。
@@ -295,31 +423,45 @@ def check_domain_resolved(domain: str, timeout: float | None = None) -> dict:
 
     try:
         import dns.resolver
-        resolver = dns.resolver.Resolver()
-        resolver.timeout = timeout
-        resolver.lifetime = timeout
+        attempts = max(1, int(attempts))
+        for attempt in range(attempts):
+            if not _wait_for_current_task():
+                result['block_reason'] = TASK_CANCELLED_MESSAGE
+                return result
+            resolver = dns.resolver.Resolver()
+            resolver.timeout = timeout
+            resolver.lifetime = timeout
+            transient_reason = None
+            try:
+                answers = resolver.resolve(domain, 'A')
+                result['resolved'] = True
+                result['dns_records'] = [str(rdata) for rdata in answers]
+                break
+            except dns.resolver.NXDOMAIN:
+                result['resolved'] = False
+                result['block_reason'] = '未解析（NXDOMAIN）：域名已注册但DNS中无解析记录，疑似已被停止解析/冻结'
+                break
+            except dns.resolver.NoAnswer:
+                result['resolved'] = False
+                result['block_reason'] = '未解析：域名已注册但未配置A记录（无网站解析）'
+                break
+            except dns.resolver.NoNameservers:
+                result['resolved'] = False
+                result['block_reason'] = '未解析：权威DNS服务器异常，无法获取解析结果'
+                break
+            except dns.resolver.Timeout:
+                transient_reason = 'DNS查询超时'
+            except Exception as e:
+                transient_reason = f'DNS查询异常: {str(e)[:60]}'
 
-        try:
-            answers = resolver.resolve(domain, 'A')
-            result['resolved'] = True
-            result['dns_records'] = [str(rdata) for rdata in answers]
-        except dns.resolver.NXDOMAIN:
-            result['resolved'] = False
-            result['block_reason'] = '未解析（NXDOMAIN）：域名已注册但DNS中无解析记录，疑似已被停止解析/冻结'
-        except dns.resolver.NoAnswer:
-            result['resolved'] = False
-            result['block_reason'] = '未解析：域名已注册但未配置A记录（无网站解析）'
-        except dns.resolver.NoNameservers:
-            result['resolved'] = False
-            result['block_reason'] = '未解析：权威DNS服务器异常，无法获取解析结果'
-        except dns.resolver.Timeout:
-            result['resolved'] = None
-            result['block_reason'] = 'DNS查询超时，解析状态未知'
-        except Exception as e:
-            result['resolved'] = None
-            result['block_reason'] = f'DNS查询异常: {str(e)[:60]}'
+            if attempt == attempts - 1:
+                retry_note = f'，已自动重试 {attempts - 1} 次' if attempts > 1 else ''
+                result['block_reason'] = f'{transient_reason}{retry_note}，解析状态仍未知；建议重新查询'
 
-        if result['resolved']:
+        if result['resolved'] and check_http:
+            if not _wait_for_current_task():
+                result['block_reason'] = TASK_CANCELLED_MESSAGE
+                return result
             try:
                 import urllib.request
                 url = f'http://{domain}'
@@ -334,7 +476,8 @@ def check_domain_resolved(domain: str, timeout: float | None = None) -> dict:
     return result
 
 
-def query_whois_with_retry(domain: str, query_mode: str = 'unlimited', timeout: int | None = None) -> dict:
+def query_whois_with_retry(domain: str, query_mode: str = 'unlimited', timeout: int | None = None,
+                           allow_rdap_fallback: bool = True) -> dict:
     """带重试机制的 WHOIS 查询；模式只影响主动等待，不改变判断规则。"""
     query_mode = normalize_query_mode(query_mode)
     with config_lock:
@@ -346,6 +489,8 @@ def query_whois_with_retry(domain: str, query_mode: str = 'unlimited', timeout: 
     if mode_config['rate_limit_delay'] is not None:
         cfg['rate_limit_delay'] = min(float(cfg['rate_limit_delay']), mode_config['rate_limit_delay'])
         cfg['retry_delay'] = min(float(cfg['retry_delay']), mode_config['retry_delay'])
+    if mode_config.get('max_retries') is not None:
+        cfg['max_retries'] = min(cfg['max_retries'], int(mode_config['max_retries']))
     if query_mode == 'unlimited':
         rate_jitter = (0.0, 0.0)
         retry_jitter = 0.0
@@ -362,11 +507,9 @@ def query_whois_with_retry(domain: str, query_mode: str = 'unlimited', timeout: 
     lookup_domain = _registration_lookup_domain(domain)
 
     for attempt in range(cfg['max_retries']):
-        # 检查暂停
         task_id = getattr(threading.current_thread(), 'task_id', None)
-        if task_id and task_pause_flags.get(task_id, False):
-            while task_pause_flags.get(task_id, False):
-                time.sleep(0.5)
+        if not _wait_for_current_task():
+            return failed_result(domain, TASK_CANCELLED_MESSAGE)
 
         try:
             rate_wait = max(0, cfg['rate_limit_delay']) + random.uniform(*rate_jitter)
@@ -410,7 +553,7 @@ def query_whois_with_retry(domain: str, query_mode: str = 'unlimited', timeout: 
                 result = _whois_success_result(domain, w)
                 logger.info(f"[{domain}] WHOIS成功")
                 if task_id:
-                    append_task_log(task_id, 'info', f'[{domain}] WHOIS 查询成功，开始检查 DNS 解析')
+                    append_task_log(task_id, 'info', f'[{domain}] WHOIS 查询成功')
                 return result
 
         except whois.exceptions.WhoisDomainNotFoundError as e:
@@ -459,7 +602,7 @@ def query_whois_with_retry(domain: str, query_mode: str = 'unlimited', timeout: 
                     last_error = f'查询异常: {str(e)[:80]}'
                 logger.warning(f"[{domain}] {last_error}")
 
-        if not rdap_attempted:
+        if allow_rdap_fallback and not rdap_attempted:
             rdap_attempted = True
             rdap_result = _query_rdap_fallback(domain, cfg['timeout'])
             if rdap_result and rdap_result['status'] in {'success', 'not_registered'}:
@@ -485,14 +628,56 @@ def query_whois_with_retry(domain: str, query_mode: str = 'unlimited', timeout: 
     return timeout_result(domain, last_error) if last_status == 'timeout' else failed_result(domain, last_error)
 
 
+def query_rdap_with_whois_fallback(domain: str, query_mode: str = 'unlimited',
+                                   timeout: int | None = None) -> dict:
+    """优先查询 RDAP；不支持或非确定性失败时使用 WHOIS 兼容回退。"""
+    with config_lock:
+        configured_timeout = CONFIG.get('timeout', 15)
+    request_timeout = normalize_timeout(timeout if timeout is not None else configured_timeout)
+    task_id = getattr(threading.current_thread(), 'task_id', None)
+
+    if task_id:
+        append_task_log(task_id, 'info', f'[{domain}] 开始 RDAP 权威查询')
+    if not _wait_for_current_task():
+        return failed_result(domain, TASK_CANCELLED_MESSAGE)
+    rdap_result = query_rdap(domain, request_timeout)
+    if rdap_result and rdap_result['status'] in {'success', 'not_registered'}:
+        logger.info(f'[{domain}] RDAP 查询成功')
+        if task_id:
+            append_task_log(task_id, 'info', f'[{domain}] RDAP 查询成功')
+        return rdap_result
+
+    reason = rdap_result['error'] if rdap_result else '该顶级域未发布 RDAP 服务'
+    logger.warning(f'[{domain}] {reason}，回退 WHOIS')
+    if task_id:
+        append_task_log(task_id, 'warn', f'[{domain}] {reason}，回退 WHOIS 标准查询')
+    return query_whois_with_retry(
+        domain,
+        query_mode=query_mode,
+        timeout=request_timeout,
+        allow_rdap_fallback=False,
+    )
+
+
+def query_registration_with_retry(domain: str, platform: str = 'rdap',
+                                  query_mode: str = 'unlimited', timeout: int | None = None) -> dict:
+    """按任务平台查询注册数据；未实现的平台保持 WHOIS 兼容行为。"""
+    if platform == 'rdap':
+        return query_rdap_with_whois_fallback(domain, query_mode=query_mode, timeout=timeout)
+    return query_whois_with_retry(domain, query_mode=query_mode, timeout=timeout)
+
+
 def process_single_domain(domain: str, task_id: 'str | None' = None,
-                          query_mode: str = 'unlimited', query_timeout: int | None = None) -> dict:
-    """处理单个域名：格式校验 → WHOIS 查询 → DNS 解析检查。
+                          query_mode: str = 'unlimited', query_timeout: int | None = None,
+                          platform: str | None = None) -> dict:
+    """处理单个域名：格式校验 → 注册数据查询 → DNS 解析检查。
 
     传入 task_id 时会将结果实时写入对应内存任务（供 Web 端轮询展示）。
     """
     domain = domain.strip().lower()
     started = time.perf_counter()
+    runtime_task_id = getattr(threading.current_thread(), 'task_id', None) or task_id
+    paused_duration_at_start = get_task_paused_duration(runtime_task_id)
     query_time = datetime.now().replace(microsecond=0).isoformat(sep=' ')
     logger.info(f"[{domain}] 开始处理")
     if task_id:
@@ -505,52 +690,84 @@ def process_single_domain(domain: str, task_id: 'str | None' = None,
             'domain': domain, 'status': 'invalid',
             'registrar': None, 'registration_date': None, 'expiration_date': None,
             'updated_date': None, 'name_servers': None, 'dnssec': None,
+            'contact_email': None,
             'whois_status': None, 'hold_status': None,
             'error': '域名格式无效', 'raw_response': None,
             'resolved': None, 'block_reason': None, 'dns_records': None
         }
     else:
-        whois_result = query_whois_with_retry(
-            domain,
-            query_mode=normalize_query_mode(query_mode),
-            timeout=query_timeout,
-        )
-        hold_statuses = get_hold_statuses(whois_result.get('whois_status'))
-        if whois_result['status'] == 'success':
-            whois_result['hold_status'] = ', '.join(hold_statuses) if hold_statuses else None
-            if hold_statuses:
-                resolve_result = {
-                    'resolved': False,
-                    'block_reason': (
-                        f"停止解析（域名被封）：WHOIS 状态 {', '.join(hold_statuses)}，"
-                        '注册商/注册局已暂停域名解析'
-                    ),
-                    'dns_records': [],
-                }
-                logger.warning(f"[{domain}] {resolve_result['block_reason']}")
-            else:
-                resolve_result = check_domain_resolved(domain, timeout=query_timeout)
-                if resolve_result['resolved']:
-                    logger.info(f"[{domain}] DNS正常: {resolve_result['dns_records'][:1]}")
+        if platform is None:
+            with config_lock:
+                platform = CONFIG.get('platform', 'rdap')
+        if not _wait_for_current_task():
+            result = {**failed_result(domain, TASK_CANCELLED_MESSAGE), **resolve_result}
+        else:
+            normalized_mode = normalize_query_mode(query_mode)
+            whois_result = query_registration_with_retry(
+                domain,
+                platform=platform,
+                query_mode=normalized_mode,
+                timeout=query_timeout,
+            )
+            if not _wait_for_current_task():
+                whois_result = failed_result(domain, TASK_CANCELLED_MESSAGE)
+            hold_statuses = get_hold_statuses(whois_result.get('whois_status'))
+            if whois_result['status'] == 'success':
+                whois_result['hold_status'] = ', '.join(hold_statuses) if hold_statuses else None
+                if hold_statuses:
+                    resolve_result = {
+                        'resolved': False,
+                        'block_reason': (
+                            f"停止解析（域名被封）：WHOIS 状态 {', '.join(hold_statuses)}，"
+                            '注册商/注册局已暂停域名解析'
+                        ),
+                        'dns_records': [],
+                    }
+                    logger.warning(f"[{domain}] {resolve_result['block_reason']}")
                 else:
-                    logger.warning(f"[{domain}] DNS异常: {resolve_result['block_reason']}")
+                    mode_config = QUERY_MODES[normalized_mode]
+                    if normalized_mode == 'brief':
+                        resolve_result = check_domain_resolved(
+                            domain,
+                            timeout=query_timeout,
+                            attempts=mode_config['dns_attempts'],
+                            check_http=mode_config['http_probe'],
+                        )
+                    else:
+                        resolve_result = check_domain_resolved(domain, timeout=query_timeout)
+                    if resolve_result['resolved']:
+                        logger.info(f"[{domain}] DNS正常: {resolve_result['dns_records'][:1]}")
+                    else:
+                        logger.warning(f"[{domain}] DNS异常: {resolve_result['block_reason']}")
 
-        result = {**whois_result, **resolve_result}
+            result = {**whois_result, **resolve_result}
 
-    duration = time.perf_counter() - started
+    if not _wait_for_current_task():
+        result = {**failed_result(domain, TASK_CANCELLED_MESSAGE), **resolve_result}
+
+    paused_duration = max(
+        0.0,
+        get_task_paused_duration(runtime_task_id) - paused_duration_at_start,
+    )
+    duration = max(0.0, time.perf_counter() - started - paused_duration)
     result['query_time'] = query_time
     result['query_duration_seconds'] = round(duration, 2)
+    result['query_state'] = 'completed'
 
     # 更新任务
     if task_id:
         with task_lock:
-            if task_id in task_storage:
+            if (task_id in task_storage
+                    and task_storage[task_id].get('status') != 'cancelled'):
                 task_storage[task_id]['refresh'] = True
 
                 found = False
                 for i, r in enumerate(task_storage[task_id]['results']):
                     if r['domain'] == domain:
                         task_storage[task_id]['results'][i] = result
+                        if (task_storage[task_id].get('operation') == 'query'
+                                and r.get('query_state') != 'completed'):
+                            task_storage[task_id]['completed'] += 1
                         found = True
                         break
 

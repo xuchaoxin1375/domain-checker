@@ -36,6 +36,7 @@ python cli.py --help
 | `domain_checker/db.py` | SQLite 结构与读写（`init_db` 幂等） |
 | `domain_checker/tasks.py` | 批量任务编排、暂停语义 |
 | `domain_checker/export.py` | 导出表头/状态文案集中在此 |
+| `domain_checker/operations.py` | 服务启动/终止操作日志（`data/operations.log`） |
 | `domain_checker/web.py` | 全部 HTTP API 与启动逻辑；路由薄、逻辑薄 |
 | `templates/index.html` | 前端；Tab 切换按 `data-tab` 属性定位（勿回退到全局 `event`） |
 | `tests/` | 每类功能一个文件；conftest 已隔离数据目录 |

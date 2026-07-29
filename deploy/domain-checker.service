@@ -1,0 +1,25 @@
+[Unit]
+Description=Domain Checker Web Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=domain-checker
+Group=domain-checker
+WorkingDirectory=/opt/domain-checker
+EnvironmentFile=/etc/domain-checker.env
+ExecStart=/opt/domain-checker/.venv/bin/gunicorn --config /opt/domain-checker/deploy/gunicorn.conf.py app:app
+ExecReload=/bin/kill -s HUP $MAINPID
+KillSignal=SIGTERM
+TimeoutStopSec=45
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/domain-checker
+
+[Install]
+WantedBy=multi-user.target
+

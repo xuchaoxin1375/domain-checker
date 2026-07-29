@@ -41,12 +41,12 @@ CONFIG = {
     'rate_limit_delay': 1.0,          # 请求间隔(秒)
     'max_retries': 3,                 # 最大重试次数
     'retry_delay': 2,                 # 重试间隔(秒)
-    'timeout': 15,                    # WHOIS/DNS/HTTP 单阶段超时时间(秒)
+    'timeout': 15,                    # WHOIS/RDAP/DNS/HTTP 每次网络请求超时(秒)
     'max_workers': 5,                 # 并发线程数
     'proxy_enabled': False,           # 是否启用代理
     'proxy_url': 'http://127.0.0.1:7897',  # 代理地址
     'proxy_auth': None,
-    'platform': 'whois',              # 查询平台: whois, whoisxml, rdap
+    'platform': 'rdap',               # 查询平台: rdap（默认）, whois, whoisxml
     'allow_lan_access': True,         # 是否允许局域网访问（关闭后仅监听 127.0.0.1，重启生效）
 }
 
@@ -67,6 +67,10 @@ QUERY_MODES = {
     'unlimited': {'name': '不限流模式', 'rate_limit_delay': 0.0, 'retry_delay': 0.0},
     'standard': {'name': '标准模式', 'rate_limit_delay': None, 'retry_delay': None},
     'quick': {'name': '快速模式', 'rate_limit_delay': 0.1, 'retry_delay': 0.5},
+    'brief': {
+        'name': '简略快速模式', 'rate_limit_delay': 0.0, 'retry_delay': 0.0,
+        'max_retries': 1, 'dns_attempts': 1, 'http_probe': False,
+    },
 }
 
 
@@ -90,8 +94,8 @@ PLATFORMS = {
         'desc': '第三方 WHOIS XML API（whoisxmlapi.com，需 API 密钥），数据结构化、稳定。暂未接入，当前自动使用 WHOIS 标准协议'
     },
     'rdap': {
-        'name': 'RDAP安全查询', 'icon': '🛡️', 'implemented': False,
-        'desc': '基于 HTTPS 的注册数据访问协议（RFC 7480），返回结构化 JSON、更安全。暂未接入，当前自动使用 WHOIS 标准协议'
+        'name': 'RDAP优先查询', 'icon': '🛡️', 'implemented': True,
+        'desc': '通过 IANA 自动发现权威 RDAP 服务，使用 HTTPS 获取结构化注册数据；服务不可用时自动回退 WHOIS'
     }
 }
 

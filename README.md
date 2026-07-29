@@ -29,16 +29,18 @@ python app.py
 
 | 分组 | 功能 |
 |------|------|
-| 查询 | WHOIS 批量查询、默认不限流及标准/快速模式、任务级超时、受控并发、自动重试、暂停/继续/取消、单条重查、批量重查失败项 |
+| 查询 | RDAP/WHOIS 批量查询、默认不限流及标准/快速/简略快速模式、任务级单次网络超时、受控并发、自动重试、结果区悬浮暂停/继续/终止、单条重查、批量重查异常及解析未知项 |
 | 未注册识别 | 只有 WHOIS 明确返回未找到文本时才判为「未注册」；空响应、网络异常不会伪装成未注册，表格另列「超时」 |
-| 解析检查 | 域名注册成功后自动检查 A 记录；识别 `clientHold/serverHold` 并准确标为**停止解析（域名被封）** |
+| 解析检查 | 域名注册成功后自动检查 A 记录；不确定的 DNS 结果自动复查一次；识别 `clientHold/serverHold` 并准确标为**停止解析（域名被封）** |
 | 平台透明 | 各平台效果与信息在配置面板内介绍；未接入的平台（WHOIS XML/RDAP）页面与运行日志均明示自动回落 WHOIS |
-| 结果 | 查询/重查加载状态与耗时、单域名查询时间/耗时、详细结果及 WHOIS/RDAP 原始响应、详细分阶段日志（可按级别过滤）、状态与解析独立筛选、表格排序、点击域名打开网站、复制域名、显眼的重新查询按钮、CSV/Excel 导出 |
+| 结果 | 状态刷新/逐条加入展示模式、查询阶段与行内加载动画、注册结论、域名原始状态、独立筛选、表格排序、拖拽换序/列宽、点击复制、重新查询及导出 |
 | 历史 | SQLite 持久化（跨重启），列表/详情/删除/定期清理，历史结果可直接回填表格或导出 |
-| 配置 | 网页可视化配置、WHOIS/DNS/HTTP 超时秒数（1-120）、配置自动持久化到 `data/settings.json`、局域网访问开关（重启生效） |
+| 运维 | 单列跨平台终止指南，以及独立板块展示的持久化服务启动/终止操作日志；网页不暴露停服接口 |
+| 配置 | 网页可视化配置、单次网络请求超时（1-120 秒，重试会累计）、配置自动持久化、局域网访问开关（重启生效） |
 | 界面 | 带行号的域名输入与演示预设、四主题、自适应布局、可左右停靠的 **VS Code 风格紧凑侧边栏** |
 
-更多界面与使用细节见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 与界面内提示。
+更多界面与使用细节见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 与界面内提示。服务器生产环境推荐使用
+[Nginx + Gunicorn + systemd 部署方案](docs/DEPLOYMENT_NGINX.md)。
 
 ## 使用方法
 
@@ -48,6 +50,12 @@ python app.py
 2. 点击「开始查询」，可随时暂停/继续/取消
 3. 点击结果表中的域名可单条重查；勾选后可批量重查/导出
 4. 「历史记录」Tab 可查看、回填、导出、删除历史任务
+5. 「使用说明」Tab 可查看服务状态及不同系统的端口排查、停止命令
+6. 「操作日志」Tab 可独立查看服务启动与终止记录；历史记录支持复选批量删除或清理全部
+
+完整的服务排查与停止方法见 [docs/OPERATIONS.md](docs/OPERATIONS.md)。关闭浏览器页面不会停止服务。
+公网部署请参照 [docs/DEPLOYMENT_NGINX.md](docs/DEPLOYMENT_NGINX.md)，不要直接暴露 Flask 开发服务器或 5000 端口。
+生产 Python 环境推荐使用 `uv` 同步仓库内的 `uv.lock`；宝塔用户需额外阅读部署文档中的反向代理与访问限制说明。
 
 ### 命令行
 
@@ -90,20 +98,20 @@ python cli.py --help               # 用法说明
 
 | 平台 | 状态 | 实际效果 |
 |------|------|----------|
-| 🔍 WHOIS标准查询 | ✅ 已接入 | 直连注册局 43 端口，信息全面：注册商、注册/过期/更新日期、DNS服务器、DNSSEC |
+| 🛡️ RDAP优先查询 | ✅ 默认 | 使用 IANA Bootstrap 自动发现权威 HTTPS 服务，获取结构化注册数据；不可用时回退 WHOIS |
+| 🔍 WHOIS标准查询 | ✅ 已接入 | 直连注册局 43 端口；首次失败时尝试权威 RDAP 容错 |
 | 🌐 WHOIS XML | 🚧 接入中 | 第三方 API（whoisxmlapi.com，需密钥）。**暂未接入，会自动回落 WHOIS 标准协议**，页面与运行日志都会明示 |
-| 🛡️ RDAP安全查询 | 🚧 接入中 | HTTPS + 结构化 JSON（RFC 7480）。**暂未接入，同样回落 WHOIS 标准协议** |
 
 接入进展见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)「扩展指南」。
 
 ### 解析状态说明
 
-WHOIS 查询结果分两类：
+注册数据查询结果分两类：
 
 | 状态 | 含义 |
 |------|------|
-| 未注册 | WHOIS 响应文本或明确异常返回未找到信号，表格显示「未注册」徽标；仅凭空响应不能下结论 |
-| 超时 | WHOIS 在超时设置内未完成，状态不确定，表格显示「超时」并保留错误原因；可在查询配置中调整 1-120 秒 |
+| 未注册 | 权威 RDAP 404、WHOIS 响应文本或明确异常返回未找到信号，表格显示「未注册」徽标；仅凭空响应不能下结论 |
+| 超时 | 单次 WHOIS 请求在设置时间内未完成会进入重试，最终仍超时才显示「超时」；重试和 RDAP 回退会累计总耗时 |
 | 成功/失败 | 成功进入 DNS 解析检查；空响应、解析错误或其他网络错误显示具体失败原因 |
 
 域名已注册时的 DNS 解析状态：
@@ -113,7 +121,7 @@ WHOIS 查询结果分两类：
 | 正常 | A 记录存在 |
 | 停止解析（域名被封） | WHOIS 状态含 `clientHold` 或 `serverHold`，注册商/注册局已暂停域名解析；此时不再重复发起 DNS 查询 |
 | 未解析 | 域名已注册但当前无解析：NXDOMAIN（通常已被停止解析/冻结）、无 A 记录、或权威 DNS 异常 |
-| 未知 | DNS 查询超时等，状态不确定 |
+| 未知 | DNS 查询超时等不确定结果；系统会自动复查一次，仍未知时提示重新查询并纳入“重新查询异常/未知” |
 
 ## HTTP API
 
@@ -133,6 +141,9 @@ GET  /api/history             历史列表
 GET  /api/history/<task_id>   历史详情
 DELETE /api/history/<task_id>
 POST /api/history/clear       清理 N 天前记录 {days:30}
+POST /api/history/delete-batch 批量删除选中的历史 {task_ids:[...]}
+POST /api/history/clear-all   清理全部历史和结果明细
+GET  /api/operations          最近的服务启动/终止操作日志
 ```
 
 ## 仓库结构
@@ -150,13 +161,17 @@ domain-checker/
 │   ├── db.py                 # SQLite 历史记录读写
 │   ├── tasks.py              # 批量任务异步编排
 │   ├── export.py             # CSV / XLSX 导出
+│   ├── operations.py         # 服务启动/终止操作日志
 │   └── web.py                # Flask 应用工厂、全部 HTTP API、启动函数
 ├── templates/index.html      # 单页前端（原生 JS，无构建）
 ├── tests/                    # pytest 测试（网络调用全部 mock）
 ├── spec/                     # Coding Agent 渐进式规格与交接规范
 ├── docs/
 │   ├── ARCHITECTURE.md       # 架构、数据流、并发模型、扩展指南
-│   └── API.md                # HTTP API 详细说明
+│   ├── API.md                # HTTP API 详细说明
+│   ├── DEPLOYMENT_NGINX.md   # Nginx + Gunicorn + systemd 生产部署
+│   └── OPERATIONS.md         # 服务运行、端口排查与跨平台停止方法
+├── deploy/                   # systemd、Gunicorn、Nginx 与环境变量模板
 ├── AGENTS.md                 # 给 coding agent 的接手指南
 ├── CONTRIBUTING.md           # 开发参与指南
 ├── CHANGELOG.md              # 版本历史
@@ -187,8 +202,8 @@ ruff check .      # 代码检查，CI 同步执行
 
 - 批量任务使用 `ThreadPoolExecutor`，并发数由网页配置中的 `max_workers` 控制
 - 进行中任务仅存于内存，服务重启后任务中断（历史结果不受影响）
-- `whoisxml`/`rdap` 平台选择目前仍是界面标识；WHOIS 失败时，`.com/.net` 会自动回退 Verisign RDAP
-  获取注册与 hold 状态（扩展点见 ARCHITECTURE）
+- RDAP 覆盖范围取决于 TLD 是否发布在 IANA Bootstrap；未发布或服务异常时自动回退 WHOIS
+- WHOIS XML 平台仍是界面标识，当前会自动回落 WHOIS 标准协议
 - Flask 内置开发服务器，仅适合内网/自用小规模使用
 
 ## License
