@@ -16,7 +16,14 @@ import tldextract
 import whois
 
 from .domains import is_valid_domain
-from .settings import CONFIG, QUERY_MODES, config_lock, normalize_query_mode, normalize_timeout
+from .settings import (
+    CONFIG,
+    DATA_DIR,
+    QUERY_MODES,
+    config_lock,
+    normalize_query_mode,
+    normalize_timeout,
+)
 from .state import (
     append_task_log,
     get_task_paused_duration,
@@ -49,13 +56,27 @@ _HOLD_STATUS_KEYS = {'clienthold': 'clientHold', 'serverhold': 'serverHold'}
 # 保持原有 .com/.net 容错能力。
 _RDAP_BOOTSTRAP_URL = 'https://data.iana.org/rdap/dns.json'
 _RDAP_BOOTSTRAP_TTL = 24 * 60 * 60
+# 引导表专用短超时：即使 data.iana.org 不可达/缓慢，也不会占用整段查询超时
+_RDAP_BOOTSTRAP_FETCH_TIMEOUT = 5.0
+# 引导表获取失败后的负缓存时长：避免网络不可达时每个域名查询都反复阻塞在请求上
+_RDAP_BOOTSTRAP_FAIL_TTL = 10 * 60
+# 引导表磁盘缓存（重启后无需重新拉取，也避免服务启动后的首个查询阻塞在网络刷新上）
+_RDAP_BOOTSTRAP_CACHE_FILE = DATA_DIR / 'rdap_bootstrap.json'
+_RDAP_BOOTSTRAP_CACHE_KEY = 'rdap_bootstrap_v1'
 _RDAP_ENDPOINTS = {
     'com': 'https://rdap.verisign.com/com/v1/',
     'net': 'https://rdap.verisign.com/net/v1/',
 }
+# DNS 单次查询与 HTTP 可达性探测的独立短超时上限：DNS 解析挂起、HTTP 探测对不响应
+# 主机的等待是批量查询慢的主要来源之一，单独设上限以收敛每个域名的最坏耗时。
+_DNS_TIMEOUT_CAP = 5.0
+_HTTP_PROBE_TIMEOUT = 3.0
+
 _rdap_bootstrap_lock = threading.Lock()
 _rdap_bootstrap_services: dict[str, tuple[str, ...]] = {}
 _rdap_bootstrap_expires_at = 0.0
+_rdap_bootstrap_next_attempt_at = 0.0
+_rdap_bootstrap_fetching = False
 _tld_extract = tldextract.TLDExtract(suffix_list_urls=())
 
 
@@ -311,29 +332,122 @@ def _parse_rdap_bootstrap(data: dict) -> dict[str, tuple[str, ...]]:
     return services
 
 
-def _rdap_services(timeout: float) -> dict[str, tuple[str, ...]]:
-    """读取并缓存 IANA RDAP 引导表；刷新失败时继续使用旧缓存。"""
+def _rdap_bootstrap_save_to_disk(services: dict[str, tuple[str, ...]]) -> None:
+    """把引导表写入磁盘缓存，供服务重启后直接使用。"""
+    try:
+        _RDAP_BOOTSTRAP_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _RDAP_BOOTSTRAP_CACHE_FILE.write_text(json.dumps({
+            'version': _RDAP_BOOTSTRAP_CACHE_KEY,
+            'fetched_at': time.time(),
+            'services': {tld: list(urls) for tld, urls in services.items()},
+        }, ensure_ascii=False), encoding='utf-8')
+    except Exception as exc:
+        logger.warning(f'RDAP 引导表磁盘缓存写入失败: {str(exc)[:80]}')
+
+
+def _rdap_bootstrap_load_from_disk() -> None:
+    """启动时加载磁盘引导表缓存；过期的先作为兜底缓存，查询不阻塞，后台会刷新。"""
     global _rdap_bootstrap_expires_at, _rdap_bootstrap_services
+    try:
+        if not _RDAP_BOOTSTRAP_CACHE_FILE.exists():
+            return
+        data = json.loads(_RDAP_BOOTSTRAP_CACHE_FILE.read_text(encoding='utf-8'))
+        if data.get('version') != _RDAP_BOOTSTRAP_CACHE_KEY:
+            return
+        services = {
+            str(tld): tuple(str(url) for url in urls)
+            for tld, urls in data.get('services', {}).items()
+        }
+        if not services:
+            return
+        fetched_at = float(data.get('fetched_at', 0.0))
+        elapsed = max(0.0, time.time() - fetched_at)
+        _rdap_bootstrap_services = services
+        _rdap_bootstrap_expires_at = time.monotonic() + max(0.0, _RDAP_BOOTSTRAP_TTL - elapsed)
+        logger.info(f'已从磁盘加载 RDAP 引导表（{len(services)} 个 TLD，{int(elapsed)} 秒前获取）')
+    except Exception as exc:
+        logger.warning(f'RDAP 引导表磁盘缓存读取失败: {str(exc)[:80]}')
 
-    with _rdap_bootstrap_lock:
-        if _rdap_bootstrap_services and time.monotonic() < _rdap_bootstrap_expires_at:
-            return _rdap_bootstrap_services.copy()
 
-        request = urllib.request.Request(
-            _RDAP_BOOTSTRAP_URL,
-            headers={'Accept': 'application/json', 'User-Agent': 'domain-checker/2.6'},
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                parsed = _parse_rdap_bootstrap(json.loads(response.read().decode('utf-8')))
-            if not parsed:
-                raise ValueError('IANA RDAP 引导表为空')
+def _rdap_bootstrap_fetch(timeout: float) -> dict[str, tuple[str, ...]]:
+    """执行一次 IANA 引导表获取并更新内存缓存；失败时写入负缓存时间戳。"""
+    global _rdap_bootstrap_expires_at, _rdap_bootstrap_next_attempt_at, _rdap_bootstrap_services
+    fetch_timeout = min(float(timeout), _RDAP_BOOTSTRAP_FETCH_TIMEOUT)
+    request = urllib.request.Request(
+        _RDAP_BOOTSTRAP_URL,
+        headers={'Accept': 'application/json', 'User-Agent': 'domain-checker/2.6'},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=fetch_timeout) as response:
+            parsed = _parse_rdap_bootstrap(json.loads(response.read().decode('utf-8')))
+        if not parsed:
+            raise ValueError('IANA RDAP 引导表为空')
+        with _rdap_bootstrap_lock:
             _rdap_bootstrap_services = parsed
             _rdap_bootstrap_expires_at = time.monotonic() + _RDAP_BOOTSTRAP_TTL
-            return parsed.copy()
-        except Exception as exc:
-            logger.warning(f'IANA RDAP 服务发现失败: {str(exc)[:100]}')
+            _rdap_bootstrap_next_attempt_at = 0.0
+        _rdap_bootstrap_save_to_disk(parsed)
+        return parsed.copy()
+    except Exception as exc:
+        logger.warning(f'IANA RDAP 服务发现失败: {str(exc)[:100]}')
+        with _rdap_bootstrap_lock:
+            _rdap_bootstrap_next_attempt_at = time.monotonic() + _RDAP_BOOTSTRAP_FAIL_TTL
+        return _rdap_bootstrap_services.copy()
+
+
+def _rdap_bootstrap_refresh_async() -> None:
+    """后台线程刷新引导表：已有新鲜缓存或正在刷新时直接跳过，查询线程不被阻塞。"""
+    def _refresh():
+        global _rdap_bootstrap_fetching
+        with _rdap_bootstrap_lock:
+            if _rdap_bootstrap_services and time.monotonic() < _rdap_bootstrap_expires_at:
+                return
+            if _rdap_bootstrap_fetching:
+                return
+            _rdap_bootstrap_fetching = True
+        try:
+            _rdap_bootstrap_fetch(_RDAP_BOOTSTRAP_FETCH_TIMEOUT)
+        finally:
+            with _rdap_bootstrap_lock:
+                _rdap_bootstrap_fetching = False
+
+    threading.Thread(target=_refresh, name='rdap-bootstrap-refresh', daemon=True).start()
+
+
+def warm_up_rdap_bootstrap() -> None:
+    """服务启动时后台预取 IANA RDAP 引导表，避免首个查询等待网络刷新。"""
+    _rdap_bootstrap_refresh_async()
+
+
+def _rdap_services(timeout: float) -> dict[str, tuple[str, ...]]:
+    """读取并缓存 IANA RDAP 引导表。
+
+    优先使用内存/磁盘缓存，查询线程不被网络刷新阻塞：
+    - 已有新鲜缓存：直接返回；
+    - 有过期缓存：先返回兜底，同时后台刷新；
+    - 无缓存：同步拉取一次（专用短超时）；拉取失败后进入负缓存窗口，
+      不再让每个域名查询都反复请求不可达的 data.iana.org。
+    """
+    global _rdap_bootstrap_fetching
+    now = time.monotonic()
+    with _rdap_bootstrap_lock:
+        if _rdap_bootstrap_services and now < _rdap_bootstrap_expires_at:
             return _rdap_bootstrap_services.copy()
+        if _rdap_bootstrap_services:
+            _rdap_bootstrap_refresh_async()
+            return _rdap_bootstrap_services.copy()
+        if _rdap_bootstrap_fetching or now < _rdap_bootstrap_next_attempt_at:
+            return _rdap_bootstrap_services.copy()
+        _rdap_bootstrap_fetching = True
+    try:
+        return _rdap_bootstrap_fetch(timeout)
+    finally:
+        with _rdap_bootstrap_lock:
+            _rdap_bootstrap_fetching = False
+
+
+# 模块加载时优先从磁盘恢复引导表缓存，纯本地读取，无网络副作用（幂等）
+_rdap_bootstrap_load_from_disk()
 
 
 def _rdap_base_url(domain: str, timeout: float) -> str | None:
@@ -420,6 +534,9 @@ def check_domain_resolved(domain: str, timeout: float | None = None, attempts: i
             timeout = normalize_timeout(CONFIG.get('timeout', 15))
     else:
         timeout = max(1.0, float(timeout))
+    # DNS 与 HTTP 探测独立设上限：正常 DNS 秒级内返回，探测挂起不应吃掉整段查询超时
+    dns_timeout = min(timeout, _DNS_TIMEOUT_CAP)
+    probe_timeout = min(timeout, _HTTP_PROBE_TIMEOUT)
 
     try:
         import dns.resolver
@@ -429,8 +546,8 @@ def check_domain_resolved(domain: str, timeout: float | None = None, attempts: i
                 result['block_reason'] = TASK_CANCELLED_MESSAGE
                 return result
             resolver = dns.resolver.Resolver()
-            resolver.timeout = timeout
-            resolver.lifetime = timeout
+            resolver.timeout = dns_timeout
+            resolver.lifetime = dns_timeout
             transient_reason = None
             try:
                 answers = resolver.resolve(domain, 'A')
@@ -466,7 +583,7 @@ def check_domain_resolved(domain: str, timeout: float | None = None, attempts: i
                 import urllib.request
                 url = f'http://{domain}'
                 req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                urllib.request.urlopen(req, timeout=timeout)
+                urllib.request.urlopen(req, timeout=probe_timeout)
                 result['http_accessible'] = True
             except Exception:
                 result['http_accessible'] = False

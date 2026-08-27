@@ -250,6 +250,67 @@ def test_rdap_is_the_default_implemented_platform(client):
     assert "rdap: { name: 'RDAP优先查询', icon: '🛡️', implemented: true" in html
 
 
+def test_result_status_columns_sort_by_semantic_rank(client):
+    html = client.get('/').get_data(as_text=True)
+
+    for fn in ['queryStateSortRank', 'registrationSortRank', 'resolutionSortRank']:
+        assert f'function {fn}(result)' in html
+    assert 'statusSortRank = { success: 0, not_registered: 1, timeout: 2, failed: 3, invalid: 4 }' in html
+    assert "if (column === 'query_state')" in html
+    assert "if (column === 'status')" in html
+    assert "if (column === 'resolved')" in html
+    assert '空值始终排在最后' in html
+    assert 'if (nA === null) return 1;' in html
+
+
+def test_export_format_is_specifiable_and_count_hints_exist(client):
+    html = client.get('/').get_data(as_text=True)
+
+    assert 'id="exportFormat"' in html
+    assert 'onchange="saveExportFormat()"' in html
+    assert 'domainCheckerExportFormat' in html
+    assert 'id="exportCountHint"' in html
+    assert 'function updateExportCountHint()' in html
+    assert '将导出筛选出的 ${count} 条' in html
+    assert '将导出全部 ${count} 条' in html
+    # 导出全部跟随表格筛选，不再有独立的导出过滤下拉
+    assert 'id="exportFilter"' not in html
+    assert 'params.set(\'status\', statusFilter)' in html
+    assert 'params.set(\'resolution\', resolutionFilter)' in html
+    # 全选只选当前筛选后可见的行
+    assert 'getFilteredResults()\n                .filter(r => (r.query_state || \'completed\') === \'completed\')' in html
+    assert 'id="historyExportFormat"' in html
+    assert 'onchange="saveHistoryExportFormat()"' in html
+    assert 'domainCheckerHistoryExportFormat' in html
+    assert "const format = document.getElementById('historyExportFormat')?.value || 'csv';" in html
+    assert '共 ${total} 条 · 筛选出 ${visibleResults.length} 条' in html
+    assert '共 0 条' in html
+    assert "document.getElementById('exportFormat').value = savedExportFormat;" in html
+
+
+def test_favicon_link_and_static_serving(client):
+    html = client.get('/').get_data(as_text=True)
+
+    assert '<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">' in html
+    favicon = client.get('/static/favicon.svg')
+    assert favicon.status_code == 200
+    assert favicon.content_type.startswith('image/svg+xml')
+    assert b'<svg xmlns=' in favicon.data
+    assert '域名批量查询系统'.encode('utf-8') in favicon.data
+
+
+def test_stats_cards_have_icons_and_semantic_colors(client):
+    html = client.get('/').get_data(as_text=True)
+
+    for stat_id in ['statTotal', 'statSuccess', 'statFailed', 'statTimeout',
+                     'statNotRegistered', 'statBlocked', 'statNormal']:
+        assert f'id="{stat_id}"' in html
+    assert 'class="stat-icon"' in html
+    assert '--stat-color' in html
+    assert 'grid-template-columns: repeat(7, minmax(0, 1fr))' in html
+    assert '@media (max-width: 1100px)' in html
+
+
 def test_brief_query_mode_and_empty_duration_placeholder(client):
     html = client.get('/').get_data(as_text=True)
 

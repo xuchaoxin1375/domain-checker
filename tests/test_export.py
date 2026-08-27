@@ -79,3 +79,59 @@ class TestFilters:
             assert {r[0] for r in rows[1:]} == expected
         finally:
             os.remove(path)
+
+    @pytest.mark.parametrize('status_filter,expected', [
+        ('success', {'ok.com', 'held.com'}),
+        ('timeout', {'slow.com'}),
+        ('failed', {'bad.com'}),
+        ('not_registered', {'never.com'}),
+        ('invalid', set()),
+        ('', {'ok.com', 'held.com', 'bad.com', 'slow.com', 'never.com'}),
+    ])
+    def test_status_filter_matrix(self, status_filter, expected):
+        path, _name = create_export_file(_results(), 'csv', status_filter=status_filter)
+        try:
+            with open(path, encoding='utf-8-sig') as f:
+                rows = list(csv.reader(f))
+            assert {r[0] for r in rows[1:]} == expected
+        finally:
+            os.remove(path)
+
+    @pytest.mark.parametrize('resolution_filter,expected', [
+        ('resolved', {'ok.com'}),
+        ('unresolved', {'held.com'}),
+        ('held', set()),
+        ('unknown', {'bad.com', 'slow.com'}),
+        ('not_applicable', {'never.com'}),
+        ('', {'ok.com', 'held.com', 'bad.com', 'slow.com', 'never.com'}),
+    ])
+    def test_resolution_filter_matrix(self, resolution_filter, expected):
+        path, _name = create_export_file(_results(), 'csv', resolution_filter=resolution_filter)
+        try:
+            with open(path, encoding='utf-8-sig') as f:
+                rows = list(csv.reader(f))
+            assert {r[0] for r in rows[1:]} == expected
+        finally:
+            os.remove(path)
+
+    def test_status_and_resolution_filters_stack(self):
+        path, _name = create_export_file(
+            _results(), 'csv', status_filter='success', resolution_filter='resolved',
+        )
+        try:
+            with open(path, encoding='utf-8-sig') as f:
+                rows = list(csv.reader(f))
+            assert {r[0] for r in rows[1:]} == {'ok.com'}
+        finally:
+            os.remove(path)
+
+    def test_held_resolution_matches_client_hold(self):
+        held = [{'domain': 'held.com', 'status': 'success', 'resolved': False,
+                 'hold_status': 'clientHold', 'block_reason': '停止解析（域名被封）'}]
+        path, _name = create_export_file(held, 'csv', resolution_filter='held')
+        try:
+            with open(path, encoding='utf-8-sig') as f:
+                rows = list(csv.reader(f))
+            assert {r[0] for r in rows[1:]} == {'held.com'}
+        finally:
+            os.remove(path)

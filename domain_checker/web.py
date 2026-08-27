@@ -15,6 +15,7 @@ from datetime import datetime
 from flask import Flask, jsonify, render_template, request, send_file
 
 from . import settings
+from .checker import warm_up_rdap_bootstrap
 from .db import (
     clear_all_history,
     clear_old_history,
@@ -481,7 +482,11 @@ def _register_routes(flask_app: Flask):
             return jsonify({'error': '没有可导出的数据'}), 400
 
         try:
-            filepath, filename = create_export_file(results, format_type, filter_type)
+            filepath, filename = create_export_file(
+                results, format_type, filter_type,
+                status_filter=request.args.get('status', ''),
+                resolution_filter=request.args.get('resolution', ''),
+            )
             mimetype = 'text/csv' if format_type == 'csv' else 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             return send_file(filepath, mimetype=mimetype, as_attachment=True, download_name=filename)
         except Exception as e:
@@ -607,6 +612,9 @@ def run_server():
     port = int(os.environ.get('DOMAIN_CHECKER_PORT', '5000'))
     debug = os.environ.get('DOMAIN_CHECKER_DEBUG', '1') != '0'
     settings.SERVER_RUNTIME.update({'host': host, 'port': port})
+
+    # 后台预取 IANA RDAP 引导表，首个查询不再等待网络刷新
+    warm_up_rdap_bootstrap()
 
     v = __version__.rpartition('.')[0]
     print("=" * 50)

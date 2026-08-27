@@ -22,8 +22,33 @@ REGISTRATION_MAP = {'success': '已注册', 'not_registered': '未注册', 'inva
 RESOLVED_MAP = {True: '正常解析', False: '未解析', None: '未知'}
 
 
-def create_export_file(results: list, format: str = 'csv', filter_type: str = 'all') -> tuple:
-    """按过滤条件生成导出文件，返回 (文件路径, 下载文件名)。"""
+def _is_held_result(result: dict) -> bool:
+    """是否命中 clientHold/serverHold（与前端 isHeldResult 语义一致）。"""
+    return bool(result.get('hold_status')
+                or '停止解析（域名被封）' in str(result.get('block_reason') or ''))
+
+
+# 解析筛选（与前端 resolutionFilterValue 语义一致），供表格筛选后的导出使用
+_RESOLUTION_FILTERS = {
+    'resolved': lambda r: r.get('resolved') is True,
+    'held': lambda r: r.get('resolved') is False and _is_held_result(r),
+    'unresolved': lambda r: r.get('resolved') is False and not _is_held_result(r),
+    'unknown': lambda r: r.get('resolved') is None and r.get('status') not in ('not_registered', 'invalid'),
+    'not_applicable': lambda r: r.get('status') in ('not_registered', 'invalid'),
+}
+
+_STATUS_FILTERS = {'success', 'not_registered', 'timeout', 'failed', 'invalid'}
+
+
+def create_export_file(results: list, format: str = 'csv', filter_type: str = 'all',
+                       status_filter: str | None = None,
+                       resolution_filter: str | None = None) -> tuple:
+    """按过滤条件生成导出文件，返回 (文件路径, 下载文件名)。
+
+    filter_type 保留兼容旧调用；status_filter/resolution_filter 与前端表格筛选
+    语义一致（success/not_registered/timeout/failed/invalid 与
+    resolved/held/unresolved/unknown/not_applicable），多条件叠加生效。
+    """
     filtered = results
     if filter_type == 'success':
         filtered = [r for r in results if r['status'] == 'success']
@@ -38,6 +63,12 @@ def create_export_file(results: list, format: str = 'csv', filter_type: str = 'a
         filtered = [r for r in results if r['status'] == 'not_registered']
     elif filter_type == 'blocked':
         filtered = [r for r in results if r.get('resolved') is False]
+
+    if status_filter in _STATUS_FILTERS:
+        filtered = [r for r in filtered if r.get('status') == status_filter]
+    resolution_matcher = _RESOLUTION_FILTERS.get(resolution_filter)
+    if resolution_matcher:
+        filtered = [r for r in filtered if resolution_matcher(r)]
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 

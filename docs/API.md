@@ -256,13 +256,15 @@ HTTP 探测及等待时间合计的完整流水线耗时，因此可以大于 `q
 
 ## 导出
 
-### GET /api/export/{task_id}?format=csv|xlsx&filter=all&selected=
+### GET /api/export/{task_id}?format=csv|xlsx&filter=all&status=&resolution=&selected=
 
 | 参数 | 取值 | 说明 |
 |------|------|------|
 | format | `csv`（默认）/ `xlsx` | CSV 带 BOM，Excel 可直接打开 |
-| filter | `all` / `success` / `normal` / `failed` / `timeout` / `not_registered` / `blocked` | normal=成功且解析非失败；timeout=查询超时；not_registered=未注册；blocked=未解析 |
-| selected | 逗号分隔域名 | 指定时优先于 filter |
+| filter | `all` / `success` / `normal` / `failed` / `timeout` / `not_registered` / `blocked` | 兼容旧调用：normal=成功且解析非失败；timeout=查询超时；not_registered=未注册；blocked=未解析 |
+| status | `success` / `not_registered` / `timeout` / `failed` / `invalid`（空=不限） | 与前端表格「状态筛选」语义一致，可与其他参数叠加 |
+| resolution | `resolved` / `held` / `unresolved` / `unknown` / `not_applicable`（空=不限） | 与前端表格「解析筛选」语义一致，可与其他参数叠加 |
+| selected | 逗号分隔域名 | 先按选中域名过滤，再叠加 filter/status/resolution 条件 |
 
 优先取内存任务结果；任务不在内存时自动回退读数据库。无数据返回 `400`。
 

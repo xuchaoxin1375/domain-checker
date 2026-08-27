@@ -90,6 +90,7 @@ class TestOperations:
         monkeypatch.setenv('DOMAIN_CHECKER_PORT', '5099')
         monkeypatch.setenv('DOMAIN_CHECKER_DEBUG', '0')
         monkeypatch.setattr(web, 'record_operation', lambda action, detail: recorded.append((action, detail)))
+        monkeypatch.setattr(web, 'warm_up_rdap_bootstrap', lambda: None)
         monkeypatch.setattr(web.app, 'run', lambda **_kwargs: None)
 
         web.run_server()
@@ -460,3 +461,32 @@ class TestHistory:
         body = resp.data.decode('utf-8-sig', errors='replace')
         assert '解析异常原因' in body
         assert 'a.com' in body
+
+    def test_export_accepts_status_and_resolution_filters(self, client):
+        db.save_history('EXP01', ['a.com', 'b.com'], 'processing')
+        db.save_results('EXP01', [
+            {'domain': 'a.com', 'status': 'success', 'registrar': 'R',
+             'resolved': True, 'block_reason': '', 'dns_records': [], 'error': ''},
+            {'domain': 'b.com', 'status': 'timeout', 'registrar': 'R',
+             'resolved': None, 'block_reason': '', 'dns_records': [], 'error': '超时'},
+        ])
+        db.update_history_counts('EXP01', 1, 1)
+        try:
+            resp = client.get('/api/export/EXP01?format=csv&status=timeout')
+            assert resp.status_code == 200
+            body = resp.data.decode('utf-8-sig', errors='replace')
+            assert 'b.com' in body
+            assert 'a.com' not in body
+
+            resp = client.get('/api/export/EXP01?format=csv&status=success&resolution=resolved')
+            assert resp.status_code == 200
+            body = resp.data.decode('utf-8-sig', errors='replace')
+            assert 'a.com' in body
+            assert 'b.com' not in body
+
+            resp = client.get('/api/export/EXP01?format=csv&status=nope')
+            assert resp.status_code == 200
+            body = resp.data.decode('utf-8-sig', errors='replace')
+            assert 'a.com' in body and 'b.com' in body
+        finally:
+            db.delete_history('EXP01')

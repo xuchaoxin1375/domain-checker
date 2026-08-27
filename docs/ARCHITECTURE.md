@@ -99,7 +99,8 @@ flowchart TD
 子域通过 `tldextract` 内置公共后缀规则归一化为可注册主域
 （`www.baidu.com → baidu.com`、`www.example.co.uk → example.co.uk`），原输入仍用于结果标识和 DNS 检查，
 避免权威服务对子域返回 404 后误判未注册。默认链路先读取并缓存 24 小时的 IANA RDAP Bootstrap，
-按 TLD 发现权威 RDAP 服务；TLD 未发布服务、RDAP 超时或非确定性失败时才进入 WHOIS 重试。
+按 TLD 发现权威 RDAP 服务；引导表持久化到磁盘并在服务启动时后台预热，获取失败后进入 10 分钟负缓存窗口，
+查询线程不会被不可达的 `data.iana.org` 阻塞；TLD 未发布服务、RDAP 超时或非确定性失败时才进入 WHOIS 重试。
 显式 WHOIS 平台仍保留首次失败后尝试 RDAP 的可靠性回退。两种协议的成功结果进入相同 hold 与 DNS 判定流程。
 
 ### 解析状态判定
@@ -119,6 +120,8 @@ flowchart TD
 文案在前端"解析"列、运行日志与导出报表中保持一致用词：正常解析 / 未解析 / 未知。
 注册数据查询成功日志不得预告 DNS 阶段；只有未检测到 hold 时才实际进入 DNS。检测到
 `clientHold/serverHold` 后直接形成停止解析结论并跳过 DNS。
+DNS 单次查询与 HTTP 可达性探测另有独立短超时上限（5 秒/3 秒，见 `checker` 模块常量），
+解析挂起或探测对不响应主机时不会占用整段 `query_timeout`。
 
 ## 数据模型
 

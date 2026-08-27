@@ -79,8 +79,9 @@ class TestCheckDomainResolved:
         assert r['dns_records'] == ['1.2.3.4']
         assert resolver.return_value.resolve.call_count == 2
 
-    def test_dns_timeout_uses_configured_timeout(self):
+    def test_dns_timeout_uses_configured_timeout_capped(self):
         from domain_checker import settings
+        from domain_checker.checker import _DNS_TIMEOUT_CAP
 
         with settings.config_lock:
             original = settings.CONFIG['timeout']
@@ -89,13 +90,15 @@ class TestCheckDomainResolved:
             with mock.patch('dns.resolver.Resolver') as R:
                 R.return_value.resolve.side_effect = _resolve_side_effect(_fake(dns.Timeout))
                 check_domain_resolved('some-registered-domain.com')
-                assert R.return_value.timeout == 7
-                assert R.return_value.lifetime == 7
+                assert R.return_value.timeout == _DNS_TIMEOUT_CAP
+                assert R.return_value.lifetime == _DNS_TIMEOUT_CAP
         finally:
             with settings.config_lock:
                 settings.CONFIG['timeout'] = original
 
     def test_dns_and_http_probe_use_explicit_timeout(self):
+        from domain_checker.checker import _HTTP_PROBE_TIMEOUT
+
         with mock.patch('dns.resolver.Resolver') as resolver, \
                 mock.patch('urllib.request.urlopen') as urlopen:
             resolver.return_value.resolve.return_value = ['1.2.3.4']
@@ -105,7 +108,7 @@ class TestCheckDomainResolved:
         assert result['resolved'] is True
         assert resolver.return_value.timeout == 4
         assert resolver.return_value.lifetime == 4
-        assert urlopen.call_args.kwargs['timeout'] == 4
+        assert urlopen.call_args.kwargs['timeout'] == _HTTP_PROBE_TIMEOUT
 
     def test_brief_dns_check_skips_http_probe_and_retry(self):
         with mock.patch('dns.resolver.Resolver') as resolver, \
@@ -592,6 +595,8 @@ class TestRdapPrimaryQuery:
         urlopen = mock.Mock(side_effect=[self._response(bootstrap), self._response(payload)])
         monkeypatch.setattr(checker, '_rdap_bootstrap_services', {})
         monkeypatch.setattr(checker, '_rdap_bootstrap_expires_at', 0.0)
+        monkeypatch.setattr(checker, '_rdap_bootstrap_next_attempt_at', 0.0)
+        monkeypatch.setattr(checker, '_rdap_bootstrap_fetching', False)
         monkeypatch.setattr(checker.urllib.request, 'urlopen', urlopen)
 
         result = checker.query_rdap('www.example.co.uk', timeout=4)
@@ -614,6 +619,8 @@ class TestRdapPrimaryQuery:
         ])
         monkeypatch.setattr(checker, '_rdap_bootstrap_services', {})
         monkeypatch.setattr(checker, '_rdap_bootstrap_expires_at', 0.0)
+        monkeypatch.setattr(checker, '_rdap_bootstrap_next_attempt_at', 0.0)
+        monkeypatch.setattr(checker, '_rdap_bootstrap_fetching', False)
         monkeypatch.setattr(checker.urllib.request, 'urlopen', urlopen)
 
         checker.query_rdap('one.test', timeout=2)
@@ -624,6 +631,30 @@ class TestRdapPrimaryQuery:
             if call.args[0].full_url == checker._RDAP_BOOTSTRAP_URL
         ]
         assert len(bootstrap_calls) == 1
+
+    def test_bootstrap_failure_is_negative_cached_and_falls_back_to_static(self, monkeypatch):
+        from domain_checker import checker
+
+        payload = {'ldhName': 'EXAMPLE.COM', 'status': ['active']}
+        urlopen = mock.Mock(side_effect=[
+            socket.timeout('timed out'), self._response(payload), self._response(payload),
+        ])
+        monkeypatch.setattr(checker, '_rdap_bootstrap_services', {})
+        monkeypatch.setattr(checker, '_rdap_bootstrap_expires_at', 0.0)
+        monkeypatch.setattr(checker, '_rdap_bootstrap_next_attempt_at', 0.0)
+        monkeypatch.setattr(checker, '_rdap_bootstrap_fetching', False)
+        monkeypatch.setattr(checker.urllib.request, 'urlopen', urlopen)
+
+        checker.query_rdap('one.example.com', timeout=4)
+        checker.query_rdap('two.example.com', timeout=4)
+
+        bootstrap_calls = [
+            call for call in urlopen.call_args_list
+            if call.args[0].full_url == checker._RDAP_BOOTSTRAP_URL
+        ]
+        # 第一次失败进入负缓存窗口，第二个查询不再反复请求 IANA，直接使用静态端点
+        assert len(bootstrap_calls) == 1
+        assert checker._rdap_bootstrap_next_attempt_at > 0
 
     def test_rdap_failure_falls_back_to_whois_without_loop(self, monkeypatch):
         from domain_checker import checker
