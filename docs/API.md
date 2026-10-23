@@ -224,9 +224,10 @@ HTTP 探测及等待时间合计的完整流水线耗时，因此可以大于 `q
 ```
 
 `created_at` 为本地 naive ISO 时间字符串。
-`status` 为 `processing`（当前进程内仍在运行）、`completed`（正常完成）或 `interrupted`
-（上次进程遗留、启动时已自动标记，通常没有结果明细）。`interrupted` 记录仍保留域名清单，
-可通过历史详情取得 `domains` 后重新查询。
+`status` 为 `processing`（当前进程内仍在运行）、`completed`（正常完成）、`cancelled`
+（用户终止，保留终止前已完成的明细）或 `interrupted`（上次进程遗留、启动时已自动标记，
+保留中断前已逐条落库的明细）。`interrupted`/`cancelled` 记录仍保留域名清单，
+可通过历史详情取得 `domains` 后重新查询；其中已完成的成功结果仍参与后续复用。
 
 ### GET /api/history/{task_id}
 

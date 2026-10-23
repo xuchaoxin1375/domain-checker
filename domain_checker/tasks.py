@@ -7,8 +7,15 @@ import time
 from datetime import datetime
 from queue import Empty, Queue
 
-from .checker import process_single_domain
-from .db import find_recent_success_results, save_history, save_results, update_history_counts
+from .checker import TASK_CANCELLED_MESSAGE, process_single_domain
+from .db import (
+    finalize_cancelled_history,
+    find_recent_success_results,
+    save_history,
+    save_result,
+    save_results,
+    update_history_counts,
+)
 from .settings import (
     CONFIG,
     PLATFORMS,
@@ -188,14 +195,22 @@ def _run_pool(domains: list[str], task_id: str, max_workers: int,
                 domain = work_queue.get_nowait()
             except Empty:
                 return
+            result = None
             try:
-                _process_domain_worker(
+                result = _process_domain_worker(
                     domain, task_id, query_mode, query_timeout, platform,
                     reuse_map.get(domain),
                 )
             except Exception as exc:
                 logger.exception(f"[{domain}] worker 处理异常")
                 _record_worker_failure(domain, task_id, exc)
+            try:
+                # 逐条落库：任务取消或进程中断后，已完成的成功结果仍可被后续查询复用。
+                # 取消产生的失败结果不覆盖该域名可能已有的有效历史。
+                if result is not None and result.get('error') != TASK_CANCELLED_MESSAGE:
+                    save_result(task_id, result)
+            except Exception as exc:
+                logger.warning(f"[{domain}] 增量保存结果失败，不影响本次查询: {str(exc)[:80]}")
             finally:
                 work_queue.task_done()
                 if track_operation:
@@ -243,6 +258,19 @@ def _complete_operation(task_id: str, started: float, label: str, work_count: in
         f'{label}完成：成功 {success_count}，其他 {failed_count}，耗时 {duration:.2f} 秒，平均 {average:.2f} 秒/域名',
     )
     return results, success_count, failed_count
+
+
+def _finalize_cancelled_task(task_id: str) -> None:
+    """取消任务后收尾：把已逐条落库的结果计入历史，并标记为已取消。"""
+    with task_lock:
+        task = task_storage.get(task_id)
+        cancelled = bool(task and task.get('status') == 'cancelled')
+    if not cancelled:
+        return
+    try:
+        finalize_cancelled_history(task_id)
+    except Exception as exc:
+        logger.warning(f"[任务{task_id}] 取消后更新历史失败: {str(exc)[:80]}")
 
 
 def process_domains_async(domains: list, task_id: str):
@@ -302,6 +330,7 @@ def process_domains_async(domains: list, task_id: str):
 
     completed = _complete_operation(task_id, started, '查询', len(domains))
     if completed is None:
+        _finalize_cancelled_task(task_id)
         return
     results, success_count, failed_count = completed
     save_results(task_id, results)
@@ -330,6 +359,7 @@ def retry_domains_async(domains: list[str], task_id: str) -> None:
 
     completed = _complete_operation(task_id, started, '重新查询', len(domains))
     if completed is None:
+        _finalize_cancelled_task(task_id)
         return
     results, success_count, failed_count = completed
     save_results(task_id, results)

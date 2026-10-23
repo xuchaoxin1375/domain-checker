@@ -104,6 +104,10 @@ def test_mark_interrupted_tasks_marks_orphaned_processing_rows(tmp_path, monkeyp
     monkeypatch.setattr(db.settings, 'DB_PATH', isolated_db)
     db.init_db()
     db.save_history('ORPHAN01', ['a.com'], 'processing')
+    db.save_result('ORPHAN01', {
+        'domain': 'a.com', 'status': 'success', 'resolved': True,
+        'query_time': '2026-01-01 00:00:00', 'query_duration_seconds': 1.0,
+    })
     db.save_history('FINISHED01', ['b.com'], 'completed', completed_at='2026-01-01T00:00:00')
 
     marked = db.mark_interrupted_tasks()
@@ -112,6 +116,9 @@ def test_mark_interrupted_tasks_marks_orphaned_processing_rows(tmp_path, monkeyp
     orphan, _ = db.get_history_detail('ORPHAN01')
     assert orphan['status'] == 'interrupted'
     assert orphan['completed_at']
+    assert orphan['results_count'] == 1
+    assert orphan['success_count'] == 1
+    assert orphan['failed_count'] == 0
     finished, _ = db.get_history_detail('FINISHED01')
     assert finished['status'] == 'completed'
     assert finished['completed_at'] == '2026-01-01T00:00:00'
@@ -202,3 +209,24 @@ class TestRecentSuccessReuse:
 
         found = db.find_recent_success_results(['again.com'], 600)
         assert found['again.com']['reused'] is True
+
+    def test_partial_results_upsert_and_cancel_finalize(self):
+        db.save_history('REUSE08', ['partial.com', 'other.com'], 'processing')
+        db.save_result('REUSE08', self._result('partial.com', registrar='First'))
+        # 同域名重复写入必须覆盖，不能留下重复行
+        db.save_result('REUSE08', self._result('partial.com', registrar='Second'))
+        db.save_result('REUSE08', self._result('other.com', status='failed', resolved=None))
+        db.finalize_cancelled_history('REUSE08')
+
+        history, rows = db.get_history_detail('REUSE08')
+        assert history['status'] == 'cancelled'
+        assert history['completed_at']
+        assert history['results_count'] == 2
+        assert history['success_count'] == 1
+        assert history['failed_count'] == 1
+        by_domain = {row['domain']: row for row in rows}
+        assert len(rows) == 2
+        assert by_domain['partial.com']['registrar'] == 'Second'
+
+        found = db.find_recent_success_results(['partial.com'], 600)
+        assert found['partial.com']['registrar'] == 'Second'

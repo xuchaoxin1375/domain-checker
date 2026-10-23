@@ -381,6 +381,7 @@ def test_pause_stops_log_polling_and_refresh_restores_task(client):
     assert 'function fillDomainsFromHistory(taskId)' in html
     assert '回填域名' in html
     assert '已中断' in html
+    assert "h.status === 'cancelled'" in html
     # 轮询中发现任务因重启丢失时必须停止轮询并回填，而不是永久 404 轮询
     assert 'if (statusResp.status === 404)' in html
     assert '查询任务已中断（服务可能已重启）' in html

@@ -2908,7 +2908,9 @@ https://www.example.com/path/to/page"></textarea>
                     const domainsShort = domains.length > 60 ? domains.slice(0, 60) + '...' : domains;
                     const statusText = h.status === 'interrupted'
                         ? '已中断'
-                        : (h.status === 'processing' ? '处理中' : '已完成');
+                        : (h.status === 'cancelled'
+                            ? '已终止'
+                            : (h.status === 'processing' ? '处理中' : '已完成'));
                     const hasResults = Number(h.results_count) > 0;
                     const actions = hasResults
                         ? `<button class="btn btn-sm btn-primary" onclick="loadHistoryDetail('${h.task_id}')">查看</button>

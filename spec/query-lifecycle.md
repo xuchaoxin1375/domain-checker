@@ -49,6 +49,8 @@
 - 新任务按 `reuse_recent_seconds`（默认 3600 秒，0 关闭）复用窗口内 `status=success` 且 DNS 有结论的
   最新结果，命中项标记 `reused=true` 并跳过网络查询；新鲜度按原始 `query_time` 计算，复用标记随结果
   写入历史。查询请求可带 `ignore_cache=true` 跳过复用；重查始终强制联网。
+- 每个域名完成后立即落库，任务取消或进程中断不会丢失已完成结果；取消任务的历史标记为
+  `cancelled`，其成功行仍参与后续复用。取消产生的失败结果不得覆盖同域名已保存的成功行。
 - 数值配置在 API 与 `settings.json` 加载时统一归一化：超范围收敛到边界，非法值忽略或返回 `400`，
   不能让任务线程因配置异常退出。
 - 访问 `task_storage` 持 `task_lock`，访问 `CONFIG` 持 `config_lock`，锁内不执行数据库 IO。

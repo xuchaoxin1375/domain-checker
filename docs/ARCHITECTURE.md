@@ -167,6 +167,9 @@ SQLite（`query_history` + `query_results`），表结构见 `db.init_db()` 的 
   `status=success` 且 `resolved` 有结论的最新记录。命中项跳过 RDAP/WHOIS/DNS/HTTP 并把
   `reused=true` 写回结果并持久化；新鲜度按原始 `query_time` 计算，复用结果再次落库不会延长 TTL。
   查询请求可带 `ignore_cache=true` 跳过复用；重查（`retry`/`retry-failed`）始终强制联网。
+- 结果逐条落库：每个域名完成后立即写入 SQLite，任务取消或进程中断时已完成的成功结果不会丢失，
+  仍可在复用窗口内被后续任务命中；取消任务按已落库结果将历史标记为 `cancelled`，正常完成时才用
+  整体覆盖写入并标记 `completed`。取消产生的失败结果不会覆盖同域名已保存的成功记录。
 - 查询任务支持 `unlimited`/`standard`/`quick`/`brief` 四种模式，默认 `unlimited` 不添加主动等待。
   前三种只调整注册查询与失败重试等待；`brief` 最多执行一次 WHOIS 尝试、一次 DNS 查询，跳过 HTTP
   探测与 DNS 自动复查，因此瞬时故障更容易显示未知或失败，但不会放宽未注册判定。任务可通过

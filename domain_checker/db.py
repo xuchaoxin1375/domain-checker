@@ -8,11 +8,15 @@
 import json
 import logging
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 
 from . import settings
 
 logger = logging.getLogger(__name__)
+
+# 工作线程会逐条落库，SQLite 写入需要串行化，避免并发提交触发 database is locked
+_write_lock = threading.Lock()
 
 
 def _connect() -> sqlite3.Connection:
@@ -103,12 +107,25 @@ def mark_interrupted_tasks() -> int:
 
     运行中任务只存在于内存；服务启动时仍为 processing 的历史必然已随进程中断，
     不应长期显示为“处理中”。本函数只在应用启动时调用，不处理当前进程内的任务。
+    中断前逐条落库的结果会同时计入统计，历史页仍可查看已完成的明细。
     """
     conn = sqlite3.connect(str(settings.DB_PATH))
     cursor = conn.cursor()
     cursor.execute('''
         UPDATE query_history
-        SET status = 'interrupted', completed_at = COALESCE(completed_at, ?)
+        SET status = 'interrupted',
+            completed_at = COALESCE(completed_at, ?),
+            results_count = (
+                SELECT COUNT(*) FROM query_results r WHERE r.task_id = query_history.task_id
+            ),
+            success_count = (
+                SELECT COUNT(*) FROM query_results r
+                WHERE r.task_id = query_history.task_id AND r.status = 'success'
+            ),
+            failed_count = (
+                SELECT COUNT(*) FROM query_results r
+                WHERE r.task_id = query_history.task_id AND r.status IS NOT 'success'
+            )
         WHERE status = 'processing'
     ''', (datetime.now().isoformat(),))
     count = cursor.rowcount
@@ -122,95 +139,158 @@ def mark_interrupted_tasks() -> int:
 def save_history(task_id: str, domains: list, status: str = 'processing',
                  completed_at: 'str | None' = None):
     """保存查询历史。"""
-    conn = sqlite3.connect(str(settings.DB_PATH))
-    cursor = conn.cursor()
+    with _write_lock:
+        conn = sqlite3.connect(str(settings.DB_PATH))
+        try:
+            cursor = conn.cursor()
 
-    success_count = 0
-    failed_count = 0
+            success_count = 0
+            failed_count = 0
 
-    if status == 'completed':
-        cursor.execute(
-            'SELECT status, COUNT(*) FROM query_results WHERE task_id = ? GROUP BY status',
-            (task_id,))
-        for row in cursor.fetchall():
-            if row[0] == 'success':
-                success_count = row[1]
-            else:
-                failed_count += row[1]
+            if status == 'completed':
+                cursor.execute(
+                    'SELECT status, COUNT(*) FROM query_results WHERE task_id = ? GROUP BY status',
+                    (task_id,))
+                for row in cursor.fetchall():
+                    if row[0] == 'success':
+                        success_count = row[1]
+                    else:
+                        failed_count += row[1]
 
-    config_json = json.dumps(settings.public_config())
+            config_json = json.dumps(settings.public_config())
+
+            cursor.execute('''
+                INSERT OR REPLACE INTO query_history
+                (task_id, domains, domain_count, results_count, success_count, failed_count, status, created_at, completed_at, config)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                task_id,
+                '\n'.join(domains),
+                len(domains),
+                success_count + failed_count,
+                success_count,
+                failed_count,
+                status,
+                datetime.now().isoformat(),
+                completed_at,
+                config_json
+            ))
+
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def _insert_result(cursor: sqlite3.Cursor, task_id: str, result: dict) -> None:
+    """把单条结果写入 query_results；调用方负责事务与提交。"""
+    dns_records = result.get('dns_records', [])
+    if isinstance(dns_records, list):
+        dns_records = ','.join(dns_records)
 
     cursor.execute('''
-        INSERT OR REPLACE INTO query_history
-        (task_id, domains, domain_count, results_count, success_count, failed_count, status, created_at, completed_at, config)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO query_results
+        (task_id, domain, status, whois_status, hold_status, registrar, contact_email, registration_date,
+         expiration_date, updated_date, name_servers, dnssec, resolved, block_reason,
+         dns_records, error, raw_response, query_time, query_duration_seconds, reused, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
-        task_id,
-        '\n'.join(domains),
-        len(domains),
-        success_count + failed_count,
-        success_count,
-        failed_count,
-        status,
-        datetime.now().isoformat(),
-        completed_at,
-        config_json
+        task_id, result.get('domain', ''), result.get('status', ''), result.get('whois_status', ''),
+        result.get('hold_status', ''), result.get('registrar', ''),
+        result.get('contact_email', ''),
+        result.get('registration_date', ''), result.get('expiration_date', ''),
+        result.get('updated_date', ''),
+        result.get('name_servers', ''), result.get('dnssec', ''),
+        1 if result.get('resolved') is True else (0 if result.get('resolved') is False else None),
+        result.get('block_reason', ''), dns_records, result.get('error', ''),
+        result.get('raw_response'),
+        result.get('query_time', ''), result.get('query_duration_seconds'),
+        1 if result.get('reused') else 0,
+        datetime.now().isoformat()
     ))
-
-    conn.commit()
-    conn.close()
 
 
 def save_results(task_id: str, results: list):
     """保存查询结果（整体覆盖同一 task_id 的旧结果）。"""
-    conn = sqlite3.connect(str(settings.DB_PATH))
-    cursor = conn.cursor()
+    with _write_lock:
+        conn = sqlite3.connect(str(settings.DB_PATH))
+        try:
+            cursor = conn.cursor()
+            # 先删除旧结果
+            cursor.execute('DELETE FROM query_results WHERE task_id = ?', (task_id,))
+            for result in results:
+                _insert_result(cursor, task_id, result)
+            conn.commit()
+        finally:
+            conn.close()
 
-    # 先删除旧结果
-    cursor.execute('DELETE FROM query_results WHERE task_id = ?', (task_id,))
 
-    for r in results:
-        dns_records = r.get('dns_records', [])
-        if isinstance(dns_records, list):
-            dns_records = ','.join(dns_records)
+def save_result(task_id: str, result: dict) -> None:
+    """增量保存单个域名结果，供取消或进程中断后继续复用。
 
-        cursor.execute('''
-            INSERT INTO query_results
-            (task_id, domain, status, whois_status, hold_status, registrar, contact_email, registration_date,
-             expiration_date, updated_date, name_servers, dnssec, resolved, block_reason,
-             dns_records, error, raw_response, query_time, query_duration_seconds, reused, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            task_id, r.get('domain', ''), r.get('status', ''), r.get('whois_status', ''),
-            r.get('hold_status', ''), r.get('registrar', ''),
-            r.get('contact_email', ''),
-            r.get('registration_date', ''), r.get('expiration_date', ''), r.get('updated_date', ''),
-            r.get('name_servers', ''), r.get('dnssec', ''),
-            1 if r.get('resolved') is True else (0 if r.get('resolved') is False else None),
-            r.get('block_reason', ''), dns_records, r.get('error', ''), r.get('raw_response'),
-            r.get('query_time', ''), r.get('query_duration_seconds'),
-            1 if r.get('reused') else 0,
-            datetime.now().isoformat()
-        ))
-
-    conn.commit()
-    conn.close()
+    同一任务内按域名覆盖写入，避免重查产生重复行；调用方保证结果已进入最终状态。
+    取消任务时不再整体覆盖，因此这里先删除同域名的旧行再插入最新结论。
+    """
+    domain = result.get('domain', '')
+    with _write_lock:
+        conn = sqlite3.connect(str(settings.DB_PATH))
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                'DELETE FROM query_results WHERE task_id = ? AND domain = ?',
+                (task_id, domain),
+            )
+            _insert_result(cursor, task_id, result)
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def update_history_counts(task_id: str, success_count: int, failed_count: int):
     """更新历史记录的统计，并将任务标记为已完成。"""
-    conn = sqlite3.connect(str(settings.DB_PATH))
-    cursor = conn.cursor()
+    with _write_lock:
+        conn = sqlite3.connect(str(settings.DB_PATH))
+        try:
+            cursor = conn.cursor()
 
-    cursor.execute('''
-        UPDATE query_history
-        SET results_count = ?, success_count = ?, failed_count = ?, status = 'completed', completed_at = ?
-        WHERE task_id = ?
-    ''', (success_count + failed_count, success_count, failed_count,
-          datetime.now().isoformat(), task_id))
+            cursor.execute('''
+                UPDATE query_history
+                SET results_count = ?, success_count = ?, failed_count = ?, status = 'completed', completed_at = ?
+                WHERE task_id = ?
+            ''', (success_count + failed_count, success_count, failed_count,
+                  datetime.now().isoformat(), task_id))
 
-    conn.commit()
-    conn.close()
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def finalize_cancelled_history(task_id: str) -> None:
+    """取消任务后按已落库结果更新历史状态与计数。
+
+    取消不整体覆盖结果：进程中断前逐条落库的成功结果必须保留，供后续查询复用。
+    """
+    with _write_lock:
+        conn = sqlite3.connect(str(settings.DB_PATH))
+        try:
+            cursor = conn.cursor()
+            success_count = 0
+            failed_count = 0
+            for status, count in cursor.execute(
+                    'SELECT status, COUNT(*) FROM query_results WHERE task_id = ? GROUP BY status',
+                    (task_id,)):
+                if status == 'success':
+                    success_count = count
+                else:
+                    failed_count += count
+            cursor.execute('''
+                UPDATE query_history
+                SET results_count = ?, success_count = ?, failed_count = ?, status = 'cancelled', completed_at = ?
+                WHERE task_id = ?
+            ''', (success_count + failed_count, success_count, failed_count,
+                  datetime.now().isoformat(), task_id))
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def get_history(limit: int = 50) -> list:

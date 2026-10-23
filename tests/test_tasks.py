@@ -555,3 +555,89 @@ def test_completed_batch_is_reused_by_next_batch(monkeypatch):
         task_pause_flags.pop(second_id, None)
         db.delete_history(first_id)
         db.delete_history(second_id)
+
+
+def test_cancelled_task_persists_partial_results_for_reuse(monkeypatch):
+    """取消任务时保留已完成结果：历史标记为已终止，成功行仍可被下次查询复用。"""
+    domain = 'cancel-partial.com'
+    task_id = 'CANCELPARTIAL'
+    now = '2026-08-01T10:00:00'
+    with task_lock:
+        task_storage[task_id] = {
+            'status': 'processing', 'total': 1, 'completed': 0,
+            'results': [create_queued_result(domain)], 'logs': [], 'refresh': False,
+            'created_at': now, 'completed_at': None, 'platform': 'rdap',
+            'operation': 'query', 'operation_total': 1, 'operation_completed': 0,
+            'operation_started_at': now, 'duration_seconds': None,
+        }
+
+    def fake_process(domain, task_id, **_kwargs):
+        # 模拟查询完成的同时用户终止任务
+        with task_lock:
+            task_storage[task_id]['status'] = 'cancelled'
+        return {
+            'domain': domain, 'status': 'success', 'registrar': 'Partial Registrar',
+            'whois_status': 'ok', 'hold_status': None, 'resolved': True,
+            'block_reason': None, 'dns_records': ['1.2.3.4'], 'error': None,
+            'raw_response': 'raw', 'reused': False, 'query_state': 'completed',
+            'query_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'query_duration_seconds': 1.0,
+        }
+
+    monkeypatch.setitem(CONFIG, 'reuse_recent_seconds', 600)
+    monkeypatch.setattr('domain_checker.tasks.process_single_domain', fake_process)
+    try:
+        process_domains_async([domain], task_id)
+
+        history, rows = db.get_history_detail(task_id)
+        assert history['status'] == 'cancelled'
+        assert history['results_count'] == 1
+        assert rows[0]['status'] == 'success'
+
+        found = db.find_recent_success_results([domain], 600)
+        assert found[domain]['registrar'] == 'Partial Registrar'
+    finally:
+        with task_lock:
+            task_storage.pop(task_id, None)
+        task_pause_flags.pop(task_id, None)
+        db.delete_history(task_id)
+
+
+def test_cancelled_inflight_failure_does_not_overwrite_saved_success(monkeypatch):
+    """取消产生的失败结果不能覆盖该域名已经落库的成功结果。"""
+    domain = 'keep-partial.com'
+    task_id = 'CANCELKEEP'
+    db.save_history(task_id, [domain], 'processing')
+    db.save_result(task_id, {
+        'domain': domain, 'status': 'success', 'registrar': 'Keep Registrar',
+        'resolved': True, 'dns_records': ['1.2.3.4'], 'error': None,
+        'query_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'query_duration_seconds': 1.0,
+    })
+    with task_lock:
+        task_storage[task_id] = {
+            'status': 'processing', 'total': 1, 'completed': 0,
+            'results': [create_queued_result(domain)], 'logs': [], 'refresh': False,
+            'created_at': '2026-08-01T10:00:00', 'completed_at': None,
+            'platform': 'rdap', 'operation': 'query', 'operation_total': 1,
+            'operation_completed': 0, 'operation_started_at': '2026-08-01T10:00:00',
+            'duration_seconds': None,
+        }
+
+    def fake_process(domain, **_kwargs):
+        return {
+            'domain': domain, 'status': 'failed', 'error': '任务已取消',
+            'resolved': None, 'query_state': 'completed',
+        }
+
+    monkeypatch.setattr('domain_checker.tasks.process_single_domain', fake_process)
+    try:
+        _run_pool([domain], task_id, max_workers=1)
+
+        found = db.find_recent_success_results([domain], 600)
+        assert found[domain]['registrar'] == 'Keep Registrar'
+    finally:
+        with task_lock:
+            task_storage.pop(task_id, None)
+        task_pause_flags.pop(task_id, None)
+        db.delete_history(task_id)
