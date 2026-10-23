@@ -204,7 +204,7 @@
             grid-template-columns: 46px minmax(0, 1fr);
             height: 150px;
             min-height: 100px;
-            resize: vertical;
+            max-height: 50vh;
             overflow: hidden;
             border: 2px solid var(--border-color);
             border-radius: 8px;
@@ -1280,7 +1280,7 @@
                 </div>
                 <div class="domain-editor">
                     <div class="line-numbers" id="domainLineNumbers" aria-hidden="true">1</div>
-                    <textarea id="domains" wrap="off" spellcheck="false" oninput="updateDomainLineNumbers()" onscroll="syncDomainLineNumbers()" placeholder="支持多种格式输入：
+                    <textarea id="domains" wrap="off" spellcheck="false" oninput="updateDomainLineNumbers(); saveDomainDraft()" onscroll="syncDomainLineNumbers()" placeholder="支持多种格式输入：
 example.com
 www.example.com
 https://example.com
@@ -1575,6 +1575,7 @@ https://www.example.com/path/to/page"></textarea>
         let currentTaskId = null;
         let pollInterval = null;
         const CURRENT_TASK_STORAGE_KEY = 'domainCheckerCurrentTask';
+        const DOMAIN_DRAFT_STORAGE_KEY = 'domainCheckerDomainDraft';
         let isPaused = false;
         let currentResults = [];
         let selectedDomains = new Set();
@@ -1624,7 +1625,45 @@ https://www.example.com/path/to/page"></textarea>
             document.getElementById('domainLineNumbers').textContent = Array.from(
                 { length: lineCount }, (_, index) => index + 1
             ).join('\n');
+            updateDomainEditorHeight();
             syncDomainLineNumbers();
+        }
+
+        // 输入框随行数自动增高，最高不超过浏览器窗口高度的一半，超出后在框内滚动
+        function updateDomainEditorHeight() {
+            const textarea = document.getElementById('domains');
+            const editor = document.querySelector('.domain-editor');
+            if (!textarea || !editor) return;
+            const textareaStyle = getComputedStyle(textarea);
+            const editorStyle = getComputedStyle(editor);
+            const lineHeight = parseFloat(textareaStyle.lineHeight) || 19.5;
+            const verticalPadding = parseFloat(textareaStyle.paddingTop) + parseFloat(textareaStyle.paddingBottom);
+            const verticalBorder = parseFloat(editorStyle.borderTopWidth) + parseFloat(editorStyle.borderBottomWidth);
+            const lineCount = Math.max(1, textarea.value.split('\n').length);
+            const contentHeight = lineCount * lineHeight + verticalPadding + verticalBorder;
+            const maxHeight = Math.max(100, Math.floor(window.innerHeight * 0.5));
+            editor.style.height = `${Math.min(Math.max(contentHeight, 150), maxHeight)}px`;
+        }
+
+        // 域名草稿保存在浏览器本地：刷新页面不丢失，只有点击“清空”时才移除
+        function saveDomainDraft() {
+            try {
+                const value = document.getElementById('domains').value;
+                if (value) localStorage.setItem(DOMAIN_DRAFT_STORAGE_KEY, value);
+                else localStorage.removeItem(DOMAIN_DRAFT_STORAGE_KEY);
+            } catch (error) { /* localStorage 不可用时不影响输入 */ }
+        }
+
+        function loadDomainDraft() {
+            try {
+                return localStorage.getItem(DOMAIN_DRAFT_STORAGE_KEY) || '';
+            } catch (error) {
+                return '';
+            }
+        }
+
+        function clearDomainDraft() {
+            try { localStorage.removeItem(DOMAIN_DRAFT_STORAGE_KEY); } catch (error) { /* 忽略 */ }
         }
 
         function syncDomainLineNumbers() {
@@ -1637,6 +1676,7 @@ https://www.example.com/path/to/page"></textarea>
             const textarea = document.getElementById('domains');
             textarea.value = preset.join('\n');
             updateDomainLineNumbers();
+            saveDomainDraft();
             textarea.focus();
             showToast(`已填充 ${preset.length} 个演示域名`, 'info');
         }
@@ -2078,6 +2118,7 @@ https://www.example.com/path/to/page"></textarea>
             if (!editor || editor.value.trim() || !results.length) return;
             editor.value = results.map(result => result.domain).join('\n');
             updateDomainLineNumbers();
+            saveDomainDraft();
         }
 
         async function restoreCurrentTask() {
@@ -2142,6 +2183,7 @@ https://www.example.com/path/to/page"></textarea>
             if (domains) {
                 document.getElementById('domains').value = domains;
                 updateDomainLineNumbers();
+                saveDomainDraft();
                 showToast('原查询已中断，已恢复域名列表，可直接重新查询', 'warn');
             } else {
                 showToast('未找到刷新前的查询进度，请重新查询', 'warn');
@@ -2894,6 +2936,7 @@ https://www.example.com/path/to/page"></textarea>
         
         function clearAll() {
             document.getElementById('domains').value = '';
+            clearDomainDraft();
             updateDomainLineNumbers();
             document.getElementById('resultsBody').innerHTML = '';
             document.getElementById('resultsCard').classList.add('hidden');
@@ -3052,6 +3095,7 @@ https://www.example.com/path/to/page"></textarea>
                 }
                 document.getElementById('domains').value = domains;
                 updateDomainLineNumbers();
+                saveDomainDraft();
                 switchTab('query');
                 showToast(`已回填 ${domains.split('\n').length} 个域名，可重新查询`, 'info');
             } catch (error) {
@@ -3354,9 +3398,12 @@ https://www.example.com/path/to/page"></textarea>
         
         // 初始化
         loadTheme();
+        const savedDomainDraft = loadDomainDraft();
+        if (savedDomainDraft) document.getElementById('domains').value = savedDomainDraft;
         loadConfig().then(restoreCurrentTask);
         renderPlatformInfo();
         updateDomainLineNumbers();
+        window.addEventListener('resize', updateDomainEditorHeight);
         setQueryMode('unlimited');
         setResultDisplayMode(localStorage.getItem('domainCheckerResultDisplayMode') || 'live');
         const savedExportFormat = localStorage.getItem('domainCheckerExportFormat');

@@ -180,6 +180,27 @@ def test_domain_presets_line_numbers_and_sidebar_preferences(client):
     assert 'data-section="logCard" data-conditional="true"' in html
 
 
+def test_domain_draft_survives_refresh_and_editor_grows_with_content(client):
+    html = client.get('/').get_data(as_text=True)
+
+    # 域名草稿写入浏览器本地，刷新后回填；只有“清空”才移除
+    assert "const DOMAIN_DRAFT_STORAGE_KEY = 'domainCheckerDomainDraft'" in html
+    assert 'function saveDomainDraft()' in html
+    assert 'function loadDomainDraft()' in html
+    assert 'function clearDomainDraft()' in html
+    assert 'oninput="updateDomainLineNumbers(); saveDomainDraft()"' in html
+    assert 'const savedDomainDraft = loadDomainDraft();' in html
+    assert "if (savedDomainDraft) document.getElementById('domains').value = savedDomainDraft;" in html
+    clear_all_start = html.index('function clearAll()')
+    clear_all_end = html.index('// 历史记录', clear_all_start)
+    assert 'clearDomainDraft();' in html[clear_all_start:clear_all_end]
+    # 输入框随内容增高，最高不超过半个浏览器窗口
+    assert 'function updateDomainEditorHeight()' in html
+    assert 'max-height: 50vh;' in html
+    assert 'window.innerHeight * 0.5' in html
+    assert "window.addEventListener('resize', updateDomainEditorHeight);" in html
+
+
 def test_mobile_sidebar_uses_accessible_hamburger_drawer(client):
     html = client.get('/').get_data(as_text=True)
 
