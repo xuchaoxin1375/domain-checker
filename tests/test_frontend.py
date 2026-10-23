@@ -70,15 +70,21 @@ def test_query_progress_has_loading_duration_and_incremental_logs(client):
     assert '已请求暂停；在途网络请求返回后生效' in html
 
 
-def test_runtime_logs_have_line_numbers_copy_and_fullscreen(client):
+def test_runtime_logs_are_a_dialog_opened_from_query_float(client):
     html = client.get('/').get_data(as_text=True)
 
     assert 'class="log-number"' in html
     assert 'function copyRunLogs()' in html
     assert '运行日志已复制' in html
-    assert 'function toggleLogFullscreen()' in html
-    assert 'id="logFullscreenButton"' in html
-    assert '#logCard:fullscreen' in html
+    # 日志默认不占版面：卡片移除，改为浮层按钮打开的弹窗
+    assert 'id="logCard"' not in html
+    assert 'id="btnOpenRunLogs" onclick="openLogDialog()"' in html
+    assert 'id="logModal"' in html
+    assert 'id="logContainer"' in html
+    assert 'function openLogDialog()' in html
+    assert 'function closeLogDialog()' in html
+    assert 'id="logLevelFilter"' in html
+    assert 'id="logFullscreenButton"' not in html
     assert 'data-section="resultsCard"' in html
     assert '.query-activity.processing {' in html
     assert 'const statusResp = await fetch(`/api/status/${currentTaskId}`)' in html
@@ -152,6 +158,32 @@ def test_result_details_and_query_modes(client):
     assert 'onclick="selectNone()">☐ 取消</button>' not in html
 
 
+def test_result_detail_dialog_has_fixed_titlebar_and_json_viewer(client):
+    html = client.get('/').get_data(as_text=True)
+
+    # 经典窗口标题行：头部固定，只有 .detail-dialog-body 滚动
+    assert '<div class="detail-dialog-body">' in html
+    assert '.detail-dialog-body { flex: 1 1 auto; min-height: 0; overflow: auto;' in html
+    assert '.detail-dialog > .detail-dialog-header {' in html
+    assert 'flex: 0 0 auto;' in html
+    dialog_start = html.index('id="detailModal"')
+    header_pos = html.index('class="detail-dialog-header"', dialog_start)
+    body_pos = html.index('class="detail-dialog-body"', dialog_start)
+    assert header_pos < body_pos
+    assert html.index('id="detailSummary"', dialog_start) > body_pos
+    assert html.index('id="detailGrid"', dialog_start) > body_pos
+
+    # 接口原始返回：行号 + JSON 高亮 + 复制
+    assert 'function renderRawResponse(value)' in html
+    assert 'function highlightJsonLine(line)' in html
+    assert 'function copyCodeBlock(button)' in html
+    assert '接口原始返回已复制' in html
+    assert 'class="code-line-number"' in html
+    assert '.code-key { color:' in html
+    assert '.code-string { color:' in html
+    assert "label === '接口原始返回'" in html
+
+
 def test_result_status_and_resolution_filters_are_independent(client):
     html = client.get('/').get_data(as_text=True)
 
@@ -161,6 +193,28 @@ def test_result_status_and_resolution_filters_are_independent(client):
     assert 'function applyResultFilters()' in html
     assert 'function resetResultFilters()' in html
     assert '<option value="timeout">超时</option>' in html
+
+
+def test_result_filters_live_in_button_dialog(client):
+    html = client.get('/').get_data(as_text=True)
+
+    # 筛选项收进「筛选器」按钮的弹窗，按钮位于结果板块下方的导出工具条
+    assert 'result-filter-bar' not in html
+    assert 'onclick="openFilterDialog()" id="btnOpenFilters"' in html
+    assert 'id="filterModal"' in html
+    assert 'function openFilterDialog()' in html
+    assert 'function closeFilterDialog()' in html
+    assert 'function activeResultFilterCount()' in html
+    assert 'id="filterActiveBadge"' in html
+    assert 'function refreshFilterOptionCounts()' in html
+    assert 'function applyFilterOptionCounts(selectId, pool, keyOf)' in html
+    assert 'RESULT_FILTER_LABELS' in html
+    # 两个下拉与条数提示仍在弹窗/工具条上，保持原有 id 以便筛选逻辑不变
+    modal_start = html.index('id="filterModal"')
+    assert html.index('id="statusFilter"') > modal_start
+    assert html.index('id="resolutionFilter"') > modal_start
+    assert 'id="visibleResultCount"' in html
+    assert html.index('id="visibleResultCount"') < modal_start
 
 
 def test_domain_presets_line_numbers_and_sidebar_preferences(client):
@@ -177,7 +231,8 @@ def test_domain_presets_line_numbers_and_sidebar_preferences(client):
     assert "fillDomainPreset('mixed'); setQueryMode('quick')" not in html
     assert 'domainCheckerSidebarPosition' in html
     assert 'function syncOutlineVisibility()' in html
-    assert 'data-section="logCard" data-conditional="true"' in html
+    assert 'data-section="resultsCard" data-conditional="true"' in html
+    assert 'data-section="logCard"' not in html
 
 
 def test_domain_draft_survives_refresh_and_editor_grows_with_content(client):
@@ -213,12 +268,20 @@ def test_mobile_sidebar_uses_accessible_hamburger_drawer(client):
     assert '.outline-sidebar.mobile-open { transform: translateX(0); }' in html
     assert "window.matchMedia('(max-width: 1250px)')" in html
     assert "setMobileSidebarOpen(false);" in html
+    # 页眉只保留产品名，标题随内容滚走；主题入口并入吸顶工具栏
     header_start = html.index('<div class="header">')
     header_end = html.index('</div>', header_start)
-    assert header_start < html.index('id="sidebarMenuButton"') < header_end
-    assert 'position: sticky;' in html
-    assert 'body.sidebar-right .sidebar-menu-button { order: 3; }' in html
-    assert '.tab { flex: 1 1 25%; padding: 11px 6px; text-align: center; }' in html
+    assert 'id="themeToggle"' not in html[header_start:header_end]
+    assert 'id="sidebarMenuButton"' not in html[header_start:header_end]
+    tabs_start = html.index('<div class="tabs">')
+    tabs_end = html.index('<!-- 查询页面 -->', tabs_start)
+    tabs_block = html[tabs_start:tabs_end]
+    assert 'id="sidebarMenuButton"' in tabs_block
+    assert 'id="themeToggle"' in tabs_block
+    assert '.tabs {\n            position: sticky;' in html
+    assert '.tabs-list { display: flex; gap: 5px; min-width: 0; flex: 1 1 auto; }' in html
+    assert 'body.sidebar-right .sidebar-menu-button { order: 4; }' in html
+    assert '.tab { flex: 0 0 auto; padding: 10px 8px; text-align: center; font-size: 12.5px; }' in html
 
 
 def test_usage_tab_has_manual_shutdown_and_platform_commands(client):
@@ -358,6 +421,24 @@ def test_brief_query_mode_and_empty_duration_placeholder(client):
     assert "if (seconds === null || seconds === undefined || seconds === '') return '';" in html
 
 
+def test_config_card_collapses_by_default_with_summary(client):
+    html = client.get('/').get_data(as_text=True)
+
+    # 标题行即折叠开关，默认收起，且有可读摘要与主题入口
+    assert 'id="configToggle" onclick="toggleConfigCard()"' in html
+    assert 'aria-expanded="false" aria-controls="configBody"' in html
+    assert '<div class="config-body" id="configBody" hidden>' in html
+    assert 'id="configSummary"' in html
+    assert 'function toggleConfigCard()' in html
+    assert 'function setConfigCollapsed(collapsed, persist = true)' in html
+    assert 'function updateConfigSummary()' in html
+    assert 'domainCheckerConfigCollapsed' in html
+    # 折叠偏好只在用户操作后写入，初始化不覆盖
+    assert 'setConfigCollapsed(collapsed, false);' in html
+    config_pos = html.index('id="configCard"')
+    assert html.index('id="configBody"', config_pos) > html.index('id="configToggle"', config_pos)
+
+
 def test_concurrency_and_reuse_settings_are_wired(client):
     html = client.get('/').get_data(as_text=True)
 
@@ -366,14 +447,20 @@ def test_concurrency_and_reuse_settings_are_wired(client):
     assert 'max="32"' in html
     assert '每个任务的并发线程上限' in html
     assert '任务开始后修改配置只影响后续任务' in html
-    # 结果复用入口与提示
-    assert 'id="cfgReuse"' in html
-    assert '结果复用(秒)' in html
-    assert 'reuse_recent_seconds: parseInt' in html
-    assert "document.getElementById('cfgReuse').value = config.reuse_recent_seconds" in html
+    # 结果复用入口与提示：小时 + 分钟自定义窗口，提交时换算成秒
+    assert 'id="cfgReuseHours"' in html
+    assert 'id="cfgReuseMinutes"' in html
+    assert '结果复用' in html
+    assert 'id="reuseSummary"' in html
+    assert '复用窗口' in html
+    assert 'min="0" max="24"' in html
+    assert 'min="0" max="59"' in html
+    assert 'reuse_recent_seconds: reuseWindowSeconds()' in html
+    assert 'function reuseWindowSeconds()' in html
+    assert 'function setReuseWindowInputs(totalSeconds)' in html
+    assert 'setReuseWindowInputs(config.reuse_recent_seconds)' in html
     assert '重查」始终强制联网' in html
-    # 默认 1 小时复用窗口 + 查询级忽略缓存开关
-    assert 'id="cfgReuse" min="0" max="86400" step="60" value="3600"' in html
+    # 查询级忽略缓存开关
     assert 'id="ignoreCache"' in html
     assert '默认复用 1 小时内成功结果' in html
     assert "ignore_cache: document.getElementById('ignoreCache').checked" in html

@@ -110,12 +110,14 @@
         
         .header {
             position: relative;
-            text-align: center;
+            display: flex;
+            align-items: center;
+            gap: 10px;
             color: var(--text-primary);
-            margin-bottom: 20px;
+            margin-bottom: 14px;
             transition: color 0.3s;
         }
-        .header h1 { font-size: 1.8rem; margin-bottom: 5px; }
+        .header h1 { flex: 1; min-width: 0; font-size: 1.8rem; margin: 0; text-align: center; }
         .header-version { margin-left: 6px; color: var(--text-secondary); font-size: 0.65em; font-weight: 500; }
         
         .card {
@@ -289,29 +291,135 @@
         
         .btn-group { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
         
-        /* 配置网格 */
-        .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+        /* 配置网格：字段改为「标签在上、控件在下」的堆叠卡片，避免 nowrap 标签撑破轨道 */
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+            gap: 10px;
+        }
         .config-item {
             display: flex;
-            align-items: center;
-            gap: 8px;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 6px;
+            min-width: 0;
             background: var(--bg-main);
-            padding: 10px 14px;
+            padding: 10px 12px;
             border-radius: 8px;
             border: 1px solid var(--border-color);
             transition: background 0.3s, border-color 0.3s;
         }
-        .config-item label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+        .config-item > label, .config-item .config-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
         .config-item input[type="number"], .config-item input[type="text"] {
-            width: 70px;
+            width: 100%;
+            min-width: 0;
             padding: 6px 8px;
             border: 1px solid var(--border-color);
             border-radius: 6px;
-            font-size: 12px;
+            font-size: 13px;
             background: var(--bg-card);
             color: var(--text-primary);
             transition: background 0.3s, color 0.3s, border-color 0.3s;
         }
+        .config-item input[type="number"]:focus-visible,
+        .config-item input[type="text"]:focus-visible,
+        .config-reuse-row input:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 1px;
+        }
+
+        /* 配置分区 */
+        .config-section { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-color); }
+        .config-section:first-of-type { margin-top: 0; padding-top: 0; border-top: 0; }
+        .config-section-head {
+            display: flex;
+            align-items: baseline;
+            gap: 8px 12px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+        .config-section-title { margin: 0; font-size: 13px; font-weight: 700; color: var(--text-primary); }
+        .config-section-hint { min-width: 0; color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+        .config-section-note { margin: 8px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+        .config-section-note strong { color: var(--text-primary); }
+
+        /* 结果复用：小时 + 分钟自定义 */
+        .config-reuse-row {
+            display: flex;
+            align-items: center;
+            gap: 10px 14px;
+            flex-wrap: wrap;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-main);
+        }
+        .config-reuse-row > label { color: var(--text-secondary); font-size: 12px; }
+        .reuse-window { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; min-width: 0; }
+        .reuse-window input[type="number"] {
+            width: 64px;
+            min-width: 0;
+            padding: 6px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 13px;
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+        .reuse-unit { color: var(--text-secondary); font-size: 12px; }
+        .reuse-summary { color: var(--text-primary); font-weight: 500; }
+
+        .config-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; margin-top: 14px; }
+
+        .config-card-header {
+            display: flex;
+            align-items: center;
+            gap: 8px 14px;
+            flex-wrap: wrap;
+            margin-bottom: 0;
+        }
+        /* 可折叠标题行：整块作为开关，展开时显示箭头朝向 */
+        .config-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: -6px;
+            padding: 4px 6px;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--text-primary);
+            font: 700 17px/1.3 inherit;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .config-toggle:hover { background: var(--bg-main); border-color: var(--border-color); }
+        .config-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+        .config-card-title { margin: 0; font-weight: 700; }
+        .config-toggle-chevron {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            flex: 0 0 18px;
+            color: var(--text-secondary);
+            transition: transform 0.2s ease, color 0.2s;
+        }
+        .config-toggle-chevron svg { width: 14px; height: 14px; display: block; }
+        .config-toggle:hover .config-toggle-chevron { color: var(--text-primary); }
+        .config-toggle[aria-expanded="true"] .config-toggle-chevron { transform: rotate(180deg); }
+        .config-summary { min-width: 0; flex: 1 1 220px; color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+        .config-body { margin-top: 14px; }
+        @media (prefers-reduced-motion: reduce) {
+            .config-toggle, .config-toggle-chevron { transition: none; }
+        }
+
         .config-note {
             margin-top: 10px;
             font-size: 12px;
@@ -325,29 +433,40 @@
             border: 1px solid var(--border-color);
         }
         
-        /* 代理配置 */
+        /* 代理与局域网：共用行式设置块 */
         .proxy-section {
             display: flex;
             align-items: center;
-            gap: 15px;
+            gap: 10px 15px;
             flex-wrap: wrap;
             background: var(--bg-main);
-            padding: 12px 15px;
+            padding: 12px 14px;
             border-radius: 8px;
             margin-top: 12px;
             border: 1px solid var(--border-color);
             transition: background 0.3s, border-color 0.3s;
         }
         .proxy-section label { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
-        .proxy-toggle { display: flex; align-items: center; gap: 8px; }
-        .proxy-toggle input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
-        .proxy-url { display: flex; align-items: center; gap: 8px; }
+        .proxy-section-note { flex: 1 1 100%; color: var(--text-secondary); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+        .proxy-section-note.warn { color: var(--warning); }
+        .proxy-toggle { display: flex; align-items: center; gap: 8px; min-width: 0; }
+        /* 复选框本身 18px，用 label 扩大命中区到 24px 以上 */
+        .proxy-toggle label {
+            display: inline-flex;
+            align-items: center;
+            min-height: 24px;
+            padding: 3px 2px;
+            cursor: pointer;
+        }
+        .proxy-toggle input[type="checkbox"] { width: 18px; height: 18px; flex: 0 0 auto; cursor: pointer; }
+        .proxy-url { display: flex; align-items: center; gap: 8px; flex: 1 1 240px; min-width: 0; }
         .proxy-url input {
+            flex: 1 1 auto;
+            min-width: 0;
             padding: 8px 12px;
             border: 1px solid var(--border-color);
             border-radius: 6px;
             font-size: 13px;
-            width: 220px;
             background: var(--bg-card);
             color: var(--text-primary);
             transition: background 0.3s, color 0.3s, border-color 0.3s;
@@ -357,21 +476,21 @@
         .platform-section {
             display: flex;
             align-items: center;
-            gap: 15px;
+            gap: 10px 15px;
             flex-wrap: wrap;
-            padding: 12px 15px;
+            padding: 12px 14px;
             background: var(--bg-main);
             border-radius: 8px;
             margin-top: 12px;
             border: 1px solid var(--border-color);
             transition: background 0.3s, border-color 0.3s;
         }
-        .platform-section label { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
-        .platform-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+        .platform-section > label { flex: 0 0 auto; font-size: 13px; color: var(--text-secondary); font-weight: 500; }
+        .platform-buttons { display: flex; gap: 8px; flex-wrap: wrap; min-width: 0; }
         .platform-btn {
-            padding: 8px 16px;
+            padding: 8px 14px;
             border: 2px solid var(--border-color);
-            border-radius: 20px;
+            border-radius: 18px;
             background: var(--bg-card);
             color: var(--text-secondary);
             font-size: 13px;
@@ -382,10 +501,11 @@
             border-color: var(--primary);
             color: var(--primary);
         }
+        .platform-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
         .platform-btn.active {
             border-color: var(--primary);
             background: var(--primary);
-            color: white;
+            color: #ffffff;
         }
         
         /* 主题选择 */
@@ -437,7 +557,7 @@
         }
         .query-activity.processing {
             position: fixed;
-            top: 12px;
+            top: 62px;
             left: 50%;
             z-index: 500;
             width: min(680px, calc(100vw - 40px));
@@ -470,6 +590,7 @@
         .query-elapsed { font: 600 13px 'Consolas', 'Monaco', monospace; color: var(--text-primary); white-space: nowrap; }
         .query-task-controls { display: none; align-items: center; gap: 6px; }
         .query-task-controls .btn { min-height: 32px; padding: 5px 10px; white-space: nowrap; }
+        .query-log-btn { min-height: 32px; padding: 5px 10px; white-space: nowrap; }
         @keyframes query-spin { to { transform: rotate(360deg); } }
         .progress-bar {
             height: 22px;
@@ -734,18 +855,21 @@
         .log-warn .log-level { color: #cca700; }
         .log-error .log-level { color: #f48771; }
         .log-message { color: #cccccc; overflow-wrap: anywhere; }
-        #logCard:fullscreen, #logCard.log-card-fullscreen {
-            background: var(--bg-card);
-            border-radius: 0;
-            padding: 18px;
-            margin: 0;
-            display: flex !important;
+        /* 运行日志弹窗：查询浮层上的「日志」按钮打开 */
+        .log-dialog {
+            display: flex;
             flex-direction: column;
-            width: 100vw;
-            height: 100vh;
+            width: min(900px, 100%);
+            height: min(760px, calc(100vh - 40px));
+            padding: 18px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-card);
+            color: var(--text-primary);
+            box-shadow: 0 18px 50px rgba(0,0,0,0.28);
         }
-        #logCard.log-card-fullscreen { position: fixed; inset: 0; z-index: 3000; }
-        #logCard:fullscreen .log-container, #logCard.log-card-fullscreen .log-container { flex: 1; max-height: none; min-height: 0; }
+        .log-dialog .detail-dialog-header { margin-bottom: 12px; }
+        .log-dialog .log-container { flex: 1; min-height: 0; max-height: none; }
         
         /* 导出选项 */
         .export-bar {
@@ -770,28 +894,33 @@
             transition: background 0.3s, color 0.3s, border-color 0.3s;
         }
         .export-bar span { font-size: 13px; color: var(--text-secondary); }
-        .result-filter-bar {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
-            padding: 10px 12px;
-            margin-bottom: 10px;
+        /* 结果筛选弹窗 */
+        .filter-dialog {
+            width: min(420px, 100%);
+            max-height: calc(100vh - 40px);
+            overflow: auto;
+            padding: 20px;
             border: 1px solid var(--border-color);
             border-radius: 8px;
-            background: var(--bg-main);
-        }
-        .result-filter-title { color: var(--text-primary); font-size: 13px; font-weight: 700; }
-        .result-filter-field { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; }
-        .result-filter-bar select {
-            padding: 6px 9px;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
             background: var(--bg-card);
             color: var(--text-primary);
-            font-size: 12px;
+            box-shadow: 0 18px 50px rgba(0,0,0,0.28);
         }
-        .result-filter-count { margin-left: auto; color: var(--text-secondary); font-size: 12px; }
+        .filter-dialog-body { display: flex; flex-direction: column; gap: 12px; }
+        .filter-field { display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary); font-size: 12px; }
+        .filter-dialog select {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-main);
+            color: var(--text-primary);
+            font-size: 13px;
+        }
+        .filter-dialog-hint { margin: 12px 0 0; color: var(--text-secondary); font-size: 12px; }
+        .filter-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+        .result-filter-count { color: var(--text-secondary); font-size: 12px; }
+        .filter-active-badge { margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: var(--primary); color: #fff; font-size: 11px; }
         
         /* 历史记录 */
         .history-section { margin-top: 20px; }
@@ -878,14 +1007,22 @@
         .operation-log-action { color: var(--text-primary); font-weight: 700; }
         .operation-log-empty { padding: 14px 0; color: var(--text-secondary); font-size: 12px; }
         
-        /* Tab切换 */
+        /* Tab 栏：吸顶常驻，标题可随内容滚走 */
         .tabs {
+            position: sticky;
+            top: 0;
+            z-index: 520;
             display: flex;
+            align-items: stretch;
             gap: 5px;
             margin-bottom: 15px;
+            padding: 0 4px;
             border-bottom: 2px solid var(--border-color);
-            transition: border-color 0.3s;
+            background: var(--bg-main);
+            box-shadow: 0 6px 12px -8px rgba(0,0,0,0.35);
+            transition: border-color 0.3s, background 0.3s;
         }
+        .tabs-list { display: flex; gap: 5px; min-width: 0; flex: 1 1 auto; }
         .tab {
             padding: 12px 24px;
             background: none;
@@ -895,12 +1032,70 @@
             color: var(--text-secondary);
             border-bottom: 3px solid transparent;
             margin-bottom: -2px;
+            white-space: nowrap;
             transition: all 0.3s;
         }
         .tab:hover { color: var(--primary); }
         .tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
-        
-        /* Toast */
+        .tab:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+
+        /* 页眉主题切换：默认收起为一枚圆点按钮，点开后才展示四套主题 */
+        .theme-section {
+            position: relative;
+            flex: 0 0 auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: auto;
+            padding-bottom: 4px;
+        }
+        .theme-toggle {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            width: 34px;
+            height: 34px;
+            padding: 0;
+            border: 1px solid var(--border-color);
+            border-radius: 50%;
+            background: var(--bg-card);
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.3s;
+        }
+        .theme-toggle:hover { border-color: var(--primary); }
+        .theme-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+        .theme-toggle-dot { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.18); }
+        .theme-toggle-dot.light { background: linear-gradient(135deg, #f5f5f5, #e0e0e0); }
+        .theme-toggle-dot.dark { background: linear-gradient(135deg, #1a1a2e, #252538); }
+        .theme-toggle-dot.green { background: linear-gradient(135deg, #10b981, #059669); }
+        .theme-toggle-dot.purple { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+        .theme-label { font-size: 13px; color: var(--text-secondary); }
+        .theme-buttons { display: flex; gap: 6px; }
+        .theme-panel {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            z-index: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background: var(--bg-card);
+            box-shadow: 0 10px 28px rgba(0,0,0,0.18);
+        }
+        .theme-panel[hidden] { display: none; }
+        .theme-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+        }
         .toast-container { position: fixed; top: 20px; right: 20px; z-index: 1000; }
         .toast {
             background: var(--bg-card);
@@ -914,7 +1109,7 @@
         @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         @keyframes fadeOut { to { opacity: 0; transform: translateX(50px); } }
 
-        /* 结果详情弹窗 */
+        /* 结果详情弹窗：经典窗口标题行布局 —— 头部固定，只有内容区滚动 */
         .detail-modal {
             position: fixed;
             inset: 0;
@@ -926,16 +1121,26 @@
             background: rgba(0,0,0,0.48);
         }
         .detail-dialog {
+            display: flex;
+            flex-direction: column;
             width: min(760px, 100%);
             max-height: min(720px, calc(100vh - 40px));
-            overflow: auto;
-            padding: 20px;
+            overflow: hidden;
+            padding: 0;
             border: 1px solid var(--border-color);
             border-radius: 8px;
             background: var(--bg-card);
             color: var(--text-primary);
             box-shadow: 0 18px 50px rgba(0,0,0,0.28);
         }
+        .detail-dialog > .detail-dialog-header {
+            flex: 0 0 auto;
+            margin: 0;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-card);
+        }
+        .detail-dialog-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 16px 18px 18px; }
         .detail-dialog-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
         .detail-dialog-title { min-width: 0; flex: 1; font-size: 18px; overflow-wrap: anywhere; }
         .detail-close-btn { flex: 0 0 auto; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border-color); border-radius: 5px; background: transparent; color: var(--text-secondary); font-size: 20px; cursor: pointer; }
@@ -946,6 +1151,30 @@
         .detail-item.full { grid-column: 1 / -1; }
         .detail-label { display: block; margin-bottom: 3px; color: var(--text-secondary); font-size: 11px; }
         .detail-value { color: var(--text-primary); font-size: 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
+        /* 接口原始返回：行号 + JSON 高亮 + 复制 */
+        .code-block { margin-top: 4px; border: 1px solid #333333; border-radius: 6px; background: #181818; overflow: hidden; }
+        .code-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid #333333; background: #202020; }
+        .code-lang { color: #4fc1ff; font: 700 11px 'Consolas', 'Monaco', monospace; letter-spacing: 0.5px; }
+        .code-meta { color: #8b949e; font-size: 11px; }
+        .code-copy-btn { margin-left: auto; padding: 3px 8px; font-size: 11px; }
+        .code-body {
+            margin: 0;
+            padding: 8px 0;
+            max-height: 320px;
+            overflow: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            color: #cccccc;
+        }
+        .code-line { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px; padding-right: 10px; }
+        .code-line:hover { background: #232323; }
+        .code-line-number { padding-right: 8px; border-right: 1px solid #343434; color: #6e7681; text-align: right; user-select: none; }
+        .code-line-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+        .code-key { color: #9cdcfe; }
+        .code-string { color: #ce9178; }
+        .code-number { color: #b5cea8; }
+        .code-literal { color: #c586c0; }
         @media (max-width: 700px) { .detail-grid { grid-template-columns: 1fr; } .detail-item.full { grid-column: auto; } }
 
         @media (max-width: 1100px) {
@@ -1079,34 +1308,46 @@
             body.sidebar-right.sidebar-collapsed,
             body.sidebar-right:not(.sidebar-collapsed) { padding: 20px; }
             .header {
-                position: sticky;
-                top: 0;
-                z-index: 550;
+                position: relative;
                 display: flex;
                 align-items: center;
                 gap: 10px;
-                min-height: 58px;
-                margin-bottom: 15px;
-                padding: 8px 12px;
+                min-height: 0;
+                margin-bottom: 8px;
+                padding: 0 2px;
+                border: 0;
+                border-radius: 0;
+                background: transparent;
+                box-shadow: none;
+                text-align: left;
+            }
+            .header h1 { order: 1; min-width: 0; flex: 1; margin: 0; font-size: 1.2rem; line-height: 1.25; }
+            /* 工具栏：汉堡 + Tab + 主题都在这条吸顶栏内 */
+            .tabs {
+                top: 0;
+                align-items: center;
+                padding: 4px 6px;
                 border: 1px solid var(--border-color);
                 border-radius: 8px;
                 background: var(--bg-card);
                 box-shadow: 0 3px 12px rgba(0,0,0,0.1);
-                text-align: left;
+                gap: 6px;
             }
-            .header h1 { order: 1; min-width: 0; flex: 1; margin: 0; font-size: 1.2rem; line-height: 1.25; }
+            .tabs-list { gap: 0; overflow-x: auto; scrollbar-width: none; }
+            .tabs-list::-webkit-scrollbar { display: none; }
             .sidebar-menu-button {
                 position: static;
                 z-index: auto;
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
-                flex: 0 0 42px;
+                flex: 0 0 38px;
+                height: 38px;
                 order: 0;
                 box-shadow: none;
             }
-            body.sidebar-right .sidebar-menu-button { order: 3; }
-            .query-activity.processing { top: 70px; }
+            body.sidebar-right .sidebar-menu-button { order: 4; }
+            .query-activity.processing { top: 62px; }
             .sidebar-backdrop.visible { display: block; }
             .outline-sidebar, .outline-sidebar.collapsed {
                 display: block;
@@ -1131,29 +1372,34 @@
             body.sidebar-right:not(.sidebar-collapsed) { padding: 10px; }
             .header {
                 gap: 8px;
-                min-height: 54px;
-                width: calc(100% + 20px);
-                margin: -10px -10px 10px;
-                padding: 7px 10px;
-                border-top: 0;
-                border-right: 0;
-                border-left: 0;
-                border-radius: 0 0 8px 8px;
+                width: 100%;
+                margin: 0 0 8px;
+                padding: 0;
             }
             .header h1 { display: flex; align-items: center; min-width: 0; margin: 0; font-size: 1.05rem; line-height: 1.25; }
             .header-icon { margin-right: 6px; font-size: 1.2rem; }
             .header-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             .header-version { margin-left: 5px; white-space: nowrap; }
-            .sidebar-menu-button { width: 38px; height: 38px; flex-basis: 38px; }
-            .tabs { gap: 0; }
-            .tab { flex: 1 1 25%; padding: 11px 6px; text-align: center; }
+            .sidebar-menu-button { width: 34px; height: 34px; flex-basis: 34px; align-self: center; }
+            .tabs { gap: 4px; }
+            .tabs-list { gap: 0; }
+            .tab { flex: 0 0 auto; padding: 10px 8px; text-align: center; font-size: 12.5px; }
+            .theme-section { align-self: center; padding-bottom: 0; margin-left: 0; }
+            .theme-toggle { width: 32px; height: 32px; }
+            .theme-panel { right: 0; }
             .card { padding: 14px; border-radius: 8px; }
             .config-grid { grid-template-columns: 1fr; }
-            .config-item { justify-content: space-between; }
-            .proxy-section, .proxy-url { align-items: stretch; flex-direction: column; gap: 8px; }
-            .proxy-url input { width: 100%; min-width: 0; }
+            .config-item { justify-content: flex-start; }
+            .config-reuse-row { align-items: flex-start; flex-direction: column; gap: 8px; }
+            .config-reuse-row > label { flex: 0 0 auto; }
+            .platform-section { align-items: flex-start; flex-direction: column; gap: 10px; }
             .platform-buttons { width: 100%; }
-            .platform-btn { flex: 1 1 130px; padding: 8px 10px; }
+            .platform-btn { flex: 1 1 100%; padding: 9px 10px; text-align: center; }
+            .proxy-section { align-items: flex-start; flex-direction: column; gap: 8px; }
+            .proxy-url { flex: 1 1 auto; width: 100%; flex-direction: column; align-items: stretch; gap: 6px; }
+            .proxy-url input { width: 100%; min-width: 0; }
+            .config-actions { justify-content: stretch; }
+            .config-actions .btn { flex: 1 1 auto; }
             .theme-label { display: none; }
             .btn-group .btn { flex: 1 1 130px; }
             .query-activity.processing { top: 72px; width: calc(100vw - 20px); }
@@ -1163,9 +1409,7 @@
             .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
             .stat-item { min-width: 0; padding: 9px 8px; }
             .stat-value { font-size: 1.25rem; }
-            .result-filter-field, .result-filter-field select { width: 100%; }
-            .result-filter-field { justify-content: space-between; }
-            .result-filter-count { width: 100%; margin-left: 0; }
+            .filter-field, .filter-field select { width: 100%; }
             .history-item { align-items: stretch; flex-direction: column; gap: 10px; }
             .history-stats { justify-content: space-between; }
             .history-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -1182,88 +1426,172 @@
 <body class="sidebar-right">
     <div class="container">
         <div class="header">
-            <button type="button" class="sidebar-menu-button" id="sidebarMenuButton" onclick="toggleMobileSidebar()"
-                    aria-label="打开页面大纲" aria-controls="outlineSidebar" aria-expanded="false" title="打开页面大纲">☰</button>
             <h1><span class="header-icon">🌐</span><span class="header-name">域名批量查询</span><span class="header-version">v2.6</span></h1>
         </div>
         
-        <!-- Tab切换 -->
+        <!-- 吸顶工具栏：Tab + 主题 + 窄屏汉堡；标题在上方，随内容滚走 -->
         <div class="tabs">
-            <button class="tab active" data-tab="query" onclick="switchTab('query')">📝 查询</button>
-            <button class="tab" data-tab="history" onclick="switchTab('history')">📚 历史记录</button>
-            <button class="tab" data-tab="operations" onclick="switchTab('operations')">操作日志</button>
-            <button class="tab" data-tab="usage" onclick="switchTab('usage')">使用说明</button>
+            <button type="button" class="sidebar-menu-button" id="sidebarMenuButton" onclick="toggleMobileSidebar()"
+                    aria-label="打开页面大纲" aria-controls="outlineSidebar" aria-expanded="false" title="打开页面大纲">☰</button>
+            <div class="tabs-list" role="tablist" aria-label="页面分区">
+                <button class="tab active" data-tab="query" role="tab" onclick="switchTab('query')">📝 查询</button>
+                <button class="tab" data-tab="history" role="tab" onclick="switchTab('history')">📚 历史记录</button>
+                <button class="tab" data-tab="operations" role="tab" onclick="switchTab('operations')">操作日志</button>
+                <button class="tab" data-tab="usage" role="tab" onclick="switchTab('usage')">使用说明</button>
+            </div>
+            <div class="theme-section" id="themeSection">
+                <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleThemePanel()"
+                        aria-expanded="false" aria-controls="themePanel" title="切换颜色主题" aria-label="切换颜色主题">
+                    <span class="theme-toggle-dot light" id="themeToggleDot" aria-hidden="true"></span>
+                </button>
+                <div class="theme-panel" id="themePanel" role="group" aria-label="颜色主题" hidden>
+                    <span class="theme-label">主题</span>
+                    <div class="theme-buttons">
+                        <button class="theme-btn light active" onclick="setTheme('light')" title="浅色" aria-label="浅色主题"></button>
+                        <button class="theme-btn dark" onclick="setTheme('dark')" title="深色" aria-label="深色主题"></button>
+                        <button class="theme-btn green" onclick="setTheme('green')" title="绿色" aria-label="绿色主题"></button>
+                        <button class="theme-btn purple" onclick="setTheme('purple')" title="紫色" aria-label="紫色主题"></button>
+                    </div>
+                </div>
+            </div>
         </div>
         
         <!-- 查询页面 -->
         <div id="tabQuery">
-            <!-- 配置面板 -->
+            <!-- 配置面板：默认折叠，标题行即开关，折叠时展示当前关键配置摘要 -->
             <div class="card" id="configCard">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h2 class="card-title" style="margin: 0;">⚙️ 查询配置</h2>
-                    <div class="theme-section">
-                        <span class="theme-label">主题:</span>
-                        <div class="theme-buttons">
-                            <button class="theme-btn light active" onclick="setTheme('light')" title="浅色"></button>
-                            <button class="theme-btn dark" onclick="setTheme('dark')" title="深色"></button>
-                            <button class="theme-btn green" onclick="setTheme('green')" title="绿色"></button>
-                            <button class="theme-btn purple" onclick="setTheme('purple')" title="紫色"></button>
+                <div class="config-card-header">
+                    <button type="button" class="config-toggle" id="configToggle" onclick="toggleConfigCard()"
+                            aria-expanded="false" aria-controls="configBody" title="展开或收起查询配置">
+                        <span class="config-card-title card-title">⚙️ 查询配置</span>
+                        <span class="config-toggle-chevron" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+                                 stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                        </span>
+                    </button>
+                    <span class="config-summary" id="configSummary"></span>
+                </div>
+
+                <div class="config-body" id="configBody" hidden>
+
+                <!-- 控制参数 -->
+                <section class="config-section" aria-labelledby="configSectionLimits">
+                    <div class="config-section-head">
+                        <h3 class="config-section-title" id="configSectionLimits">查询控制</h3>
+                        <span class="config-section-hint">超时与并发按任务生效</span>
+                    </div>
+                    <div class="config-grid">
+                        <div class="config-item">
+                            <label for="cfgRateLimit">限流(秒)</label>
+                            <input type="number" id="cfgRateLimit" step="0.1" min="0" max="60" value="1.0"
+                                   title="RDAP 与 WHOIS 每次请求前的主动等待；不限流模式为 0">
+                        </div>
+                        <div class="config-item">
+                            <label for="cfgRetries">重试次数</label>
+                            <input type="number" id="cfgRetries" min="1" max="10" value="3" title="单次网络请求的重试次数（1-10）">
+                        </div>
+                        <div class="config-item">
+                            <label for="cfgWorkers">并发线程</label>
+                            <input type="number" id="cfgWorkers" min="1" max="32" value="5"
+                                   title="每个任务的并发线程上限（1-32）；修改后在下一个任务生效">
+                        </div>
+                        <div class="config-item">
+                            <label for="cfgTimeout">默认单次超时(秒)</label>
+                            <input type="number" id="cfgTimeout" min="1" max="120" value="15"
+                                   onchange="syncQueryTimeoutFromDefault()"
+                                   title="每次 WHOIS、RDAP、DNS 或 HTTP 请求的超时；重试会累计总耗时">
+                        </div>
+                        <div class="config-item">
+                            <label for="cfgMaxBatch">单批上限</label>
+                            <input type="number" id="cfgMaxBatch" min="10" max="1000" value="500" title="单次任务最多可提交的域名数（10-1000）">
+                        </div>
+                        <div class="config-item">
+                            <label for="cfgPersistentRounds">执着轮数</label>
+                            <input type="number" id="cfgPersistentRounds" min="1" max="20" value="5"
+                                   title="执着模式最多查询轮数（含首轮）；失败、超时或解析未知的域名自动重试，单次超时逐轮放宽">
                         </div>
                     </div>
-                </div>
-                
-                <div class="config-grid">
-                    <div class="config-item"><label>限流(秒):</label><input type="number" id="cfgRateLimit" step="0.1" min="0" max="60" value="1.0" title="RDAP 与 WHOIS 每次请求前的主动等待；不限流模式为 0"></div>
-                    <div class="config-item"><label>重试:</label><input type="number" id="cfgRetries" min="1" max="10" value="3"></div>
-                    <div class="config-item"><label>并发:</label><input type="number" id="cfgWorkers" min="1" max="32" value="5" title="每个任务的并发线程上限（1-32）；修改后在下一个任务生效"></div>
-                    <div class="config-item"><label>默认单次超时(秒):</label><input type="number" id="cfgTimeout" min="1" max="120" value="15" onchange="syncQueryTimeoutFromDefault()" title="每次 WHOIS、RDAP、DNS 或 HTTP 请求的超时；重试会累计总耗时"></div>
-                    <div class="config-item"><label>单批上限:</label><input type="number" id="cfgMaxBatch" min="10" max="1000" value="500"></div>
-                    <div class="config-item"><label>结果复用(秒):</label><input type="number" id="cfgReuse" min="0" max="86400" step="60" value="3600" title="默认复用 1 小时内最近一次成功且 DNS 有结论的结果；0 表示关闭"></div>
-                    <div class="config-item"><label>执着轮数:</label><input type="number" id="cfgPersistentRounds" min="1" max="20" value="5" title="执着模式最多查询轮数（含首轮）；失败、超时或解析未知的域名自动重试，单次超时逐轮放宽"></div>
-                </div>
-                <div class="config-note">
-                    并发是<strong>每个任务</strong>的线程池上限，任务开始后修改配置只影响后续任务；多个任务同时运行会各自占用线程。
-                    结果复用只复用窗口内「查询成功且 DNS 有结论」的记录（默认 1 小时），命中后跳过网络查询；
-                    查询区勾选「忽略缓存」可让本次任务全部联网；点「重查」始终强制联网。
-                    执着模式按轮重试失败、超时或解析未知的域名，单次请求超时逐轮放宽（最长 120 秒），轮数上限包含首次查询。
-                </div>
-                
-                <!-- 平台选择 -->
-                <div class="platform-section">
-                    <label>查询平台:</label>
-                    <div class="platform-buttons">
-                        <button class="platform-btn" data-platform="whois" onclick="setPlatform('whois')">🔍 WHOIS标准</button>
-                        <button class="platform-btn" data-platform="whoisxml" onclick="setPlatform('whoisxml')">🌐 WHOIS XML</button>
-                        <button class="platform-btn active" data-platform="rdap" onclick="setPlatform('rdap')">🛡️ RDAP优先</button>
+                    <p class="config-section-note">
+                        并发是<strong>每个任务</strong>的线程池上限，任务开始后修改配置只影响后续任务；多个任务同时运行会各自占用线程。
+                        执着模式按轮重试失败、超时或解析未知的域名，单次请求超时逐轮放宽（最长 120 秒），轮数上限包含首次查询。
+                    </p>
+                </section>
+
+                <!-- 结果复用 -->
+                <section class="config-section" aria-labelledby="configSectionReuse">
+                    <div class="config-section-head">
+                        <h3 class="config-section-title" id="configSectionReuse">结果复用</h3>
+                        <span class="config-section-hint">命中缓存时跳过网络查询</span>
                     </div>
-                    <span id="platformHint" style="font-size: 12px; color: var(--warning); display: none; width: 100%;"></span>
-                    <!-- 各平台效果与信息介绍（由 JS 渲染，与下方 platforms 定义保持同步） -->
-                    <div class="platform-info-list" id="platformInfoList"></div>
-                </div>
-                
-                <!-- 代理配置 -->
-                <div class="proxy-section">
-                    <div class="proxy-toggle">
-                        <input type="checkbox" id="cfgProxyEnabled">
-                        <label for="cfgProxyEnabled">启用代理</label>
+                    <div class="config-reuse-row">
+                        <label for="cfgReuseHours">复用窗口</label>
+                        <span class="reuse-window">
+                            <input type="number" id="cfgReuseHours" min="0" max="24" step="1" value="1"
+                                   onchange="updateReuseSummary()" oninput="updateReuseSummary()"
+                                   aria-label="复用窗口小时数（0-24）" title="复用窗口的小时部分（0-24）">
+                            <span class="reuse-unit">小时</span>
+                            <input type="number" id="cfgReuseMinutes" min="0" max="59" step="1" value="0"
+                                   onchange="updateReuseSummary()" oninput="updateReuseSummary()"
+                                   aria-label="复用窗口分钟数（0-59）" title="复用窗口的分钟部分（0-59）">
+                            <span class="reuse-unit">分钟</span>
+                        </span>
+                        <span class="reuse-summary" id="reuseSummary"></span>
                     </div>
-                    <div class="proxy-url">
-                        <label>代理地址:</label>
-                        <input type="text" id="cfgProxyUrl" value="http://127.0.0.1:7897" placeholder="http://127.0.0.1:7897">
+                    <p class="config-section-note">
+                        窗口上限 24 小时，两项都填 0 表示关闭；只复用窗口内「查询成功且 DNS 有结论」的记录。
+                        查询区勾选「忽略缓存」可让本次任务全部联网；点「重查」始终强制联网。
+                    </p>
+                </section>
+
+                <!-- 查询平台 -->
+                <section class="config-section" aria-labelledby="configSectionPlatform">
+                    <div class="config-section-head">
+                        <h3 class="config-section-title" id="configSectionPlatform">查询平台</h3>
+                        <span class="config-section-hint">未接入的平台自动回落 WHOIS</span>
                     </div>
-                </div>
-                
-                <!-- 局域网访问设置 -->
-                <div class="proxy-section">
-                    <div class="proxy-toggle">
-                        <input type="checkbox" id="cfgLanAccess">
-                        <label for="cfgLanAccess">允许局域网访问</label>
+                    <div class="platform-section">
+                        <div class="platform-buttons" role="group" aria-label="查询平台选择">
+                            <button class="platform-btn" data-platform="whois" onclick="setPlatform('whois')">🔍 WHOIS标准</button>
+                            <button class="platform-btn" data-platform="whoisxml" onclick="setPlatform('whoisxml')">🌐 WHOIS XML</button>
+                            <button class="platform-btn active" data-platform="rdap" onclick="setPlatform('rdap')">🛡️ RDAP优先</button>
+                        </div>
+                        <span id="platformHint" style="display: none; color: var(--warning); font-size: 12px; flex: 1 1 100%;"></span>
+                        <!-- 各平台效果与信息介绍（由 JS 渲染，与下方 platforms 定义保持同步） -->
+                        <div class="platform-info-list" id="platformInfoList"></div>
                     </div>
-                    <span id="lanStatus" style="font-size: 12px; color: var(--text-secondary);"></span>
-                    <span style="font-size: 12px; color: var(--warning);">⚠️ 开启后同一局域网的设备可通过 http://本机IP:5000 访问本系统；此项修改需重启程序后生效</span>
+                </section>
+
+                <!-- 网络与访问 -->
+                <section class="config-section" aria-labelledby="configSectionNetwork">
+                    <div class="config-section-head">
+                        <h3 class="config-section-title" id="configSectionNetwork">网络与访问</h3>
+                        <span class="config-section-hint">代理立即生效，局域网开关重启生效</span>
+                    </div>
+                    <div class="proxy-section">
+                        <div class="proxy-toggle">
+                            <input type="checkbox" id="cfgProxyEnabled" aria-labelledby="cfgProxyEnabledLabel">
+                            <label id="cfgProxyEnabledLabel" for="cfgProxyEnabled">启用代理</label>
+                        </div>
+                        <div class="proxy-url">
+                            <label for="cfgProxyUrl">代理地址</label>
+                            <input type="text" id="cfgProxyUrl" value="http://127.0.0.1:7897"
+                                   placeholder="http://127.0.0.1:7897">
+                        </div>
+                    </div>
+                    <div class="proxy-section">
+                        <div class="proxy-toggle">
+                            <input type="checkbox" id="cfgLanAccess" aria-labelledby="cfgLanAccessLabel">
+                            <label id="cfgLanAccessLabel" for="cfgLanAccess">允许局域网访问</label>
+                        </div>
+                        <span id="lanStatus" style="font-size: 12px; color: var(--text-secondary);"></span>
+                        <span class="proxy-section-note warn">⚠️ 开启后同一局域网的设备可通过 http://本机IP:5000 访问本系统；此项修改需重启程序后生效</span>
+                    </div>
+                </section>
+
+                <div class="config-actions">
+                    <button class="btn btn-primary btn-sm" onclick="saveConfig()">💾 保存配置</button>
                 </div>
-                
-                <button class="btn btn-secondary btn-sm" onclick="saveConfig()" style="margin-top: 12px;">💾 保存配置</button>
+                </div><!-- /configBody -->
             </div>
             
             <!-- 输入区域 -->
@@ -1291,7 +1619,7 @@
                     <label class="query-timeout-field" for="queryTimeout" title="每次网络请求的超时；WHOIS 重试、RDAP 回退、DNS 复查和 HTTP 探测会累计总耗时">单次请求超时
                         <input type="number" id="queryTimeout" min="1" max="120" value="15">秒
                     </label>
-                    <label class="query-cache-toggle" for="ignoreCache" title="默认复用 1 小时内查询成功且 DNS 有结论的结果；勾选后本任务全部重新联网查询">
+                    <label class="query-cache-toggle" for="ignoreCache" title="默认复用配置的窗口内查询成功且 DNS 有结论的结果；勾选后本任务全部重新联网查询">
                         <input type="checkbox" id="ignoreCache"> 忽略缓存
                     </label>
                     <label class="query-cache-toggle" for="persistentMode" title="开启后，查询失败、超时或解析状态未知的域名会自动重新查询；每轮把单次请求超时放宽一倍（最长 120 秒），直到得到结论或达到轮数上限">
@@ -1321,23 +1649,7 @@ https://www.example.com/path/to/page"></textarea>
                 </div>
             </div>
             
-            <!-- 日志 -->
-            <div class="card" id="logCard" style="display: none;">
-                <h2 class="card-title">
-                    📜 运行日志
-                    <span class="log-toolbar">
-                        <select id="logLevelFilter" onchange="changeLogLevel()" aria-label="日志级别">
-                            <option value="all">全部</option>
-                            <option value="info">信息</option>
-                            <option value="warn">警告</option>
-                            <option value="error">错误</option>
-                        </select>
-                        <button type="button" class="btn btn-sm btn-secondary log-action-button" onclick="copyRunLogs()" title="复制当前日志" aria-label="复制当前日志">⧉</button>
-                        <button type="button" class="btn btn-sm btn-secondary log-action-button" id="logFullscreenButton" onclick="toggleLogFullscreen()" title="全屏查看日志" aria-label="全屏查看日志">⛶</button>
-                    </span>
-                </h2>
-                <div class="log-container" id="logContainer"></div>
-            </div>
+            <!-- 日志：默认不占版面，由查询浮层上的「日志」按钮以弹窗打开 -->
             
             <!-- 结果区域 -->
             <div class="card hidden" id="resultsCard">
@@ -1354,6 +1666,8 @@ https://www.example.com/path/to/page"></textarea>
                             <div class="query-activity-detail" id="queryActivityDetail">正在提交任务...</div>
                         </div>
                         <div class="query-elapsed" id="queryElapsed"></div>
+                        <button class="btn btn-sm btn-secondary query-log-btn" id="btnOpenRunLogs" onclick="openLogDialog()"
+                                title="查看运行日志" aria-label="查看运行日志">📜 日志</button>
                         <div class="query-task-controls" id="queryTaskControls" aria-label="查询任务控制">
                             <button class="btn btn-sm btn-warning" id="btnPause" onclick="togglePause()">⏸ 暂停</button>
                             <button class="btn btn-sm btn-danger" id="btnCancel" onclick="cancelTask()">⏹ 终止</button>
@@ -1372,36 +1686,13 @@ https://www.example.com/path/to/page"></textarea>
                     <div class="stat-item" style="--stat-color: #0891b2;"><div class="stat-icon">📶</div><div class="stat-value" id="statNormal">0</div><div class="stat-label">正常</div></div>
                 </div>
 
-                <div class="result-filter-bar" aria-label="结果筛选">
-                    <span class="result-filter-title">表格筛选</span>
-                    <label class="result-filter-field" for="statusFilter">状态筛选
-                        <select id="statusFilter" onchange="applyResultFilters()">
-                            <option value="all">全部状态</option>
-                            <option value="success">成功</option>
-                            <option value="not_registered">未注册</option>
-                            <option value="timeout">超时</option>
-                            <option value="failed">失败</option>
-                            <option value="invalid">格式无效</option>
-                        </select>
-                    </label>
-                    <label class="result-filter-field" for="resolutionFilter">解析筛选
-                        <select id="resolutionFilter" onchange="applyResultFilters()">
-                            <option value="all">全部解析状态</option>
-                            <option value="resolved">正常</option>
-                            <option value="held">停止解析</option>
-                            <option value="unresolved">未解析</option>
-                            <option value="unknown">未知</option>
-                            <option value="not_applicable">不适用</option>
-                        </select>
-                    </label>
-                    <button type="button" class="btn btn-sm btn-secondary" onclick="resetResultFilters()">重置筛选</button>
-                    <span class="result-filter-count" id="visibleResultCount">共 0 条</span>
-                </div>
-                
                 <div class="export-bar">
                     <button class="btn btn-sm btn-success retry-action-btn" onclick="retrySelected()" id="btnRetrySel">🔄 重新查询选中</button>
                     <button class="btn btn-sm btn-warning retry-action-btn" onclick="retryFailed()" id="btnRetryFail">🔄 重新查询异常/未知</button>
                     <span style="font-size: 12px; color: var(--text-secondary);">已选 <span id="selectionCount">0</span> 项</span>
+                    <button class="btn btn-sm btn-secondary" onclick="openFilterDialog()" id="btnOpenFilters"
+                            title="按查询状态和域名状态筛选表格结果">🔎 筛选器<span class="filter-active-badge hidden" id="filterActiveBadge">0</span></button>
+                    <span class="result-filter-count" id="visibleResultCount">共 0 条</span>
                     
                     <span style="margin-left: 15px;">格式:</span>
                     <select id="exportFormat" onchange="saveExportFormat()">
@@ -1576,8 +1867,70 @@ https://www.example.com/path/to/page"></textarea>
                 <h2 class="detail-dialog-title" id="detailDialogTitle">域名详细结果</h2>
                 <button type="button" class="detail-close-btn" onclick="closeResultDetails()" title="关闭" aria-label="关闭详细结果">×</button>
             </div>
-            <div class="detail-summary" id="detailSummary"></div>
-            <div class="detail-grid" id="detailGrid"></div>
+            <div class="detail-dialog-body">
+                <div class="detail-summary" id="detailSummary"></div>
+                <div class="detail-grid" id="detailGrid"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="detail-modal hidden" id="filterModal" role="dialog" aria-modal="true" aria-labelledby="filterDialogTitle"
+         onclick="if (event.target === this) closeFilterDialog()">
+        <div class="filter-dialog">
+            <div class="detail-dialog-header">
+                <h2 class="detail-dialog-title" id="filterDialogTitle">筛选器</h2>
+                <button type="button" class="detail-close-btn" id="filterDialogClose" onclick="closeFilterDialog()"
+                        title="关闭" aria-label="关闭筛选器">×</button>
+            </div>
+            <div class="filter-dialog-body">
+                <label class="filter-field" for="statusFilter">查询状态
+                    <select id="statusFilter" onchange="applyResultFilters()">
+                        <option value="all">全部状态</option>
+                        <option value="success">成功</option>
+                        <option value="not_registered">未注册</option>
+                        <option value="timeout">超时</option>
+                        <option value="failed">失败</option>
+                        <option value="invalid">格式无效</option>
+                    </select>
+                </label>
+                <label class="filter-field" for="resolutionFilter">域名状态
+                    <select id="resolutionFilter" onchange="applyResultFilters()">
+                        <option value="all">全部解析状态</option>
+                        <option value="resolved">正常</option>
+                        <option value="held">停止解析</option>
+                        <option value="unresolved">未解析</option>
+                        <option value="unknown">未知</option>
+                        <option value="not_applicable">不适用</option>
+                    </select>
+                </label>
+            </div>
+            <p class="filter-dialog-hint" id="filterDialogHint">共 0 条</p>
+            <div class="filter-dialog-actions">
+                <button type="button" class="btn btn-sm btn-secondary" onclick="resetResultFilters()">重置筛选</button>
+                <button type="button" class="btn btn-sm btn-primary" onclick="closeFilterDialog()">完成</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="detail-modal hidden" id="logModal" role="dialog" aria-modal="true" aria-labelledby="logDialogTitle"
+         onclick="if (event.target === this) closeLogDialog()">
+        <div class="log-dialog">
+            <div class="detail-dialog-header">
+                <h2 class="detail-dialog-title" id="logDialogTitle">📜 运行日志</h2>
+                <span class="log-toolbar">
+                    <select id="logLevelFilter" onchange="changeLogLevel()" aria-label="日志级别">
+                        <option value="all">全部</option>
+                        <option value="info">信息</option>
+                        <option value="warn">警告</option>
+                        <option value="error">错误</option>
+                    </select>
+                    <button type="button" class="btn btn-sm btn-secondary log-action-button" onclick="copyRunLogs()"
+                            title="复制当前日志" aria-label="复制当前日志">⧉</button>
+                    <button type="button" class="detail-close-btn" id="logDialogClose" onclick="closeLogDialog()"
+                            title="关闭" aria-label="关闭运行日志">×</button>
+                </span>
+            </div>
+            <div class="log-container" id="logContainer"></div>
         </div>
     </div>
 
@@ -1590,7 +1943,6 @@ https://www.example.com/path/to/page"></textarea>
         </div>
         <button class="outline-item active" data-section="configCard" onclick="scrollToSection('configCard')" title="查询配置"><span class="outline-icon">⚙</span><span class="outline-label">查询配置</span></button>
         <button class="outline-item" data-section="inputCard" onclick="scrollToSection('inputCard')" title="输入域名"><span class="outline-icon">▤</span><span class="outline-label">输入域名</span></button>
-        <button class="outline-item" data-section="logCard" data-conditional="true" onclick="scrollToSection('logCard')" title="运行日志" hidden><span class="outline-icon">›_</span><span class="outline-label">运行日志</span></button>
         <button class="outline-item" data-section="resultsCard" data-conditional="true" onclick="scrollToSection('resultsCard')" title="查询结果" hidden><span class="outline-icon">▦</span><span class="outline-label">查询结果</span></button>
         <button class="outline-item" data-section="history" onclick="switchTab('history')" title="历史记录"><span class="outline-icon">◷</span><span class="outline-label">历史记录</span></button>
         <button class="outline-item" data-section="operations" onclick="switchTab('operations')" title="操作日志"><span class="outline-icon">≡</span><span class="outline-label">操作日志</span></button>
@@ -1808,19 +2160,55 @@ https://www.example.com/path/to/page"></textarea>
             }
         });
         
-        // 主题切换
+        // 主题切换（页眉圆点按钮 → 弹出四套主题）
         function setTheme(theme) {
             currentTheme = theme;
             document.body.setAttribute('data-theme', theme);
-            
+
             document.querySelectorAll('.theme-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
-            document.querySelector(`.theme-btn.${theme}`).classList.add('active');
-            
+            const activeBtn = document.querySelector(`.theme-btn.${theme}`);
+            if (activeBtn) activeBtn.classList.add('active');
+            const dot = document.getElementById('themeToggleDot');
+            if (dot) {
+                dot.className = `theme-toggle-dot ${theme}`;
+            }
+            closeThemePanel();
+
             // 保存到本地
             localStorage.setItem('domainCheckerTheme', theme);
         }
+
+        function toggleThemePanel() {
+            const panel = document.getElementById('themePanel');
+            const toggle = document.getElementById('themeToggle');
+            if (!panel || !toggle) return;
+            setThemePanelOpen(panel.hidden);
+        }
+
+        function setThemePanelOpen(open) {
+            const panel = document.getElementById('themePanel');
+            const toggle = document.getElementById('themeToggle');
+            if (!panel || !toggle) return;
+            panel.hidden = !open;
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (open) {
+                const active = panel.querySelector('.theme-btn.active');
+                if (active) active.focus();
+            }
+        }
+
+        function closeThemePanel() {
+            const panel = document.getElementById('themePanel');
+            if (panel && !panel.hidden) setThemePanelOpen(false);
+        }
+
+        // 点面板外或按 Esc 收起主题面板
+        document.addEventListener('click', event => {
+            const section = document.getElementById('themeSection');
+            if (section && !section.contains(event.target)) closeThemePanel();
+        });
         
         // 加载保存的主题
         function loadTheme() {
@@ -1849,6 +2237,7 @@ https://www.example.com/path/to/page"></textarea>
                 hint.style.display = 'inline';
                 showToast(`${platforms[platform].name} 暂未接入，将使用 WHOIS 标准协议查询`, 'info');
             }
+            updateConfigSummary();
         }
         
         // 渲染各平台效果与信息介绍
@@ -1993,7 +2382,111 @@ https://www.example.com/path/to/page"></textarea>
             renderResults();
         }
         
+        // 配置面板默认折叠（查询配置不常用），偏好保存在本地；折叠时显示关键配置摘要
+        const CONFIG_COLLAPSED_STORAGE_KEY = 'domainCheckerConfigCollapsed';
+
+        function setConfigCollapsed(collapsed, persist = true) {
+            const body = document.getElementById('configBody');
+            const toggle = document.getElementById('configToggle');
+            if (!body || !toggle) return;
+            body.hidden = collapsed;
+            toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            // 箭头方向由 aria-expanded 的 CSS 控制，JS 不再改字符
+            if (persist) {
+                try {
+                    localStorage.setItem(CONFIG_COLLAPSED_STORAGE_KEY, collapsed ? '1' : '0');
+                } catch (error) { /* localStorage 不可用时仅本次会话有效 */ }
+            }
+        }
+
+        function toggleConfigCard() {
+            const body = document.getElementById('configBody');
+            if (!body) return;
+            setConfigCollapsed(!body.hidden);
+        }
+
+        // 折叠态摘要：让用户不展开也能看到当前关键配置
+        function updateConfigSummary() {
+            const el = document.getElementById('configSummary');
+            if (!el) return;
+            const value = id => {
+                const input = document.getElementById(id);
+                return input ? input.value.trim() : '';
+            };
+            const parts = [];
+            if (value('cfgWorkers')) parts.push(`并发 ${value('cfgWorkers')}`);
+            if (value('cfgTimeout')) parts.push(`超时 ${value('cfgTimeout')} 秒`);
+            parts.push(reuseWindowSeconds() === 0
+                ? '缓存复用关闭'
+                : `缓存 ${formatReuseWindow(reuseWindowSeconds())}`);
+            const platformBtn = document.querySelector('.platform-btn.active');
+            if (platformBtn) parts.push(platformBtn.textContent.trim().replace(/^\S+\s*/, ''));
+            el.textContent = parts.join(' · ');
+        }
+
+        function initConfigCard() {
+            let collapsed = true;
+            try {
+                const saved = localStorage.getItem(CONFIG_COLLAPSED_STORAGE_KEY);
+                if (saved !== null) collapsed = saved === '1';
+            } catch (error) { /* 默认折叠 */ }
+            setConfigCollapsed(collapsed, false);
+            updateConfigSummary();
+        }
+
         // 配置
+        // 结果复用窗口：界面上按「小时 + 分钟」输入，提交时换算成秒（后端仍用 reuse_recent_seconds）
+        function reuseWindowSeconds() {
+            const hoursInput = document.getElementById('cfgReuseHours');
+            const minutesInput = document.getElementById('cfgReuseMinutes');
+            const hours = Math.max(0, Math.min(24, parseInt(hoursInput?.value, 10) || 0));
+            const minutes = Math.max(0, Math.min(59, parseInt(minutesInput?.value, 10) || 0));
+            return Math.min(86400, hours * 3600 + minutes * 60);
+        }
+
+        function formatReuseWindow(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const parts = [];
+            if (hours > 0) parts.push(`${hours} 小时`);
+            if (minutes > 0) parts.push(`${minutes} 分钟`);
+            return parts.length ? parts.join(' ') : '0 分钟';
+        }
+
+        function updateReuseSummary() {
+            const el = document.getElementById('reuseSummary');
+            const minutesInput = document.getElementById('cfgReuseMinutes');
+            if (minutesInput && parseInt(minutesInput.value, 10) > 59) minutesInput.value = '59';
+            const hoursInput = document.getElementById('cfgReuseHours');
+            if (hoursInput && parseInt(hoursInput.value, 10) > 24) hoursInput.value = '24';
+            const total = reuseWindowSeconds();
+            updateCacheHint(total);
+            updateConfigSummary();
+            if (!el) return;
+            el.textContent = total === 0
+                ? '当前设置：关闭复用，每次查询都联网。'
+                : `当前设置：${formatReuseWindow(total)}（${total} 秒）内的成功结果直接复用。`;
+        }
+
+        // 查询区的缓存提示跟随当前配置，避免仍写着“1 小时”
+        function updateCacheHint(seconds) {
+            const el = document.getElementById('cacheHint');
+            if (!el) return;
+            const total = Math.max(0, Math.min(86400, parseInt(seconds, 10) || 0));
+            el.textContent = total === 0
+                ? '缓存复用已关闭，本次查询全部联网'
+                : `复用 ${formatReuseWindow(total)}内成功结果`;
+        }
+
+        function setReuseWindowInputs(totalSeconds) {
+            const total = Math.max(0, Math.min(86400, parseInt(totalSeconds, 10) || 0));
+            const hoursInput = document.getElementById('cfgReuseHours');
+            const minutesInput = document.getElementById('cfgReuseMinutes');
+            if (hoursInput) hoursInput.value = Math.floor(total / 3600);
+            if (minutesInput) minutesInput.value = Math.round((total % 3600) / 60);
+            updateReuseSummary();
+        }
+
         async function saveConfig() {
             const config = {
                 rate_limit_delay: parseFloat(document.getElementById('cfgRateLimit').value),
@@ -2001,7 +2494,7 @@ https://www.example.com/path/to/page"></textarea>
                 max_workers: parseInt(document.getElementById('cfgWorkers').value),
                 timeout: parseInt(document.getElementById('cfgTimeout').value),
                 max_domains_per_batch: parseInt(document.getElementById('cfgMaxBatch').value),
-                reuse_recent_seconds: parseInt(document.getElementById('cfgReuse').value),
+                reuse_recent_seconds: reuseWindowSeconds(),
                 persistent_max_rounds: parseInt(document.getElementById('cfgPersistentRounds').value),
                 proxy_enabled: document.getElementById('cfgProxyEnabled').checked,
                 proxy_url: document.getElementById('cfgProxyUrl').value,
@@ -2030,7 +2523,7 @@ https://www.example.com/path/to/page"></textarea>
                 document.getElementById('cfgTimeout').value = config.timeout;
                 document.getElementById('queryTimeout').value = config.timeout;
                 document.getElementById('cfgMaxBatch').value = config.max_domains_per_batch;
-                document.getElementById('cfgReuse').value = config.reuse_recent_seconds;
+                setReuseWindowInputs(config.reuse_recent_seconds);
                 document.getElementById('cfgPersistentRounds').value = config.persistent_max_rounds || 5;
                 persistentRoundsLimit = Math.max(1, Math.min(20, parseInt(config.persistent_max_rounds) || 5));
                 updatePersistentHint();
@@ -2041,6 +2534,7 @@ https://www.example.com/path/to/page"></textarea>
                 if (config.platform) {
                     setPlatform(config.platform);
                 }
+                updateConfigSummary();
             } catch (e) { console.error('加载配置失败', e); }
         }
         
@@ -2100,7 +2594,6 @@ https://www.example.com/path/to/page"></textarea>
             setTaskBusy(true);
             updateQueryActivity('processing', 'query', 0, 0, 0);
             document.getElementById('progressSection').classList.add('active');
-            document.getElementById('logCard').style.display = 'block';
             document.getElementById('resultsCard').classList.remove('hidden');
             document.getElementById('resultsBody').innerHTML = '';
             document.getElementById('logContainer').innerHTML = '';
@@ -2213,7 +2706,6 @@ https://www.example.com/path/to/page"></textarea>
                 updatePauseButton();
 
                 document.getElementById('resultsCard').classList.remove('hidden');
-                document.getElementById('logCard').style.display = 'block';
                 document.getElementById('progressSection').classList.add('active');
                 syncOutlineVisibility();
 
@@ -2474,27 +2966,6 @@ https://www.example.com/path/to/page"></textarea>
             showToast(copied ? '运行日志已复制' : '复制失败，请手动复制', copied ? 'success' : 'error');
         }
 
-        async function toggleLogFullscreen() {
-            const card = document.getElementById('logCard');
-            if (document.fullscreenElement === card) {
-                await document.exitFullscreen();
-            } else if (card.requestFullscreen) {
-                await card.requestFullscreen();
-            } else {
-                card.classList.toggle('log-card-fullscreen');
-                updateLogFullscreenButton(card.classList.contains('log-card-fullscreen'));
-            }
-        }
-
-        function updateLogFullscreenButton(active = document.fullscreenElement === document.getElementById('logCard')) {
-            const button = document.getElementById('logFullscreenButton');
-            button.textContent = active ? '×' : '⛶';
-            button.title = active ? '退出全屏' : '全屏查看日志';
-            button.setAttribute('aria-label', button.title);
-        }
-
-        document.addEventListener('fullscreenchange', () => updateLogFullscreenButton());
-
         function isHeldResult(result) {
             return Boolean(result.hold_status || (result.block_reason || '').includes('停止解析（域名被封）'));
         }
@@ -2520,6 +2991,108 @@ https://www.example.com/path/to/page"></textarea>
 
         function applyResultFilters() {
             renderResults();
+        }
+
+        // 筛选项基础文案：弹窗中的选项带实时条目数量，形如「失败（3）」
+        const RESULT_FILTER_LABELS = {
+            statusFilter: {
+                all: '全部状态', success: '成功', not_registered: '未注册',
+                timeout: '超时', failed: '失败', invalid: '格式无效'
+            },
+            resolutionFilter: {
+                all: '全部解析状态', resolved: '正常', held: '停止解析',
+                unresolved: '未解析', unknown: '未知', not_applicable: '不适用'
+            }
+        };
+
+        // 与 getFilteredResults 一致的可见范围：逐条展示模式跳过还没状态的行
+        function countableResults() {
+            return currentResults.filter(result =>
+                currentResultDisplayMode === 'live' ||
+                (result.status !== null && result.status !== undefined));
+        }
+
+        // 数量按另一项筛选交叉统计，选中后看到的行数与数字一致
+        function refreshFilterOptionCounts() {
+            const pool = countableResults();
+            const statusValue = document.getElementById('statusFilter')?.value || 'all';
+            const resolutionValue = document.getElementById('resolutionFilter')?.value || 'all';
+            const statusPool = resolutionValue === 'all'
+                ? pool
+                : pool.filter(result => resolutionFilterValue(result) === resolutionValue);
+            const resolutionPool = statusValue === 'all'
+                ? pool
+                : pool.filter(result => result.status === statusValue);
+            applyFilterOptionCounts('statusFilter', statusPool, result => result.status);
+            applyFilterOptionCounts('resolutionFilter', resolutionPool, result => resolutionFilterValue(result));
+        }
+
+        function applyFilterOptionCounts(selectId, pool, keyOf) {
+            const select = document.getElementById(selectId);
+            const labels = RESULT_FILTER_LABELS[selectId];
+            if (!select || !labels) return;
+            const counts = { all: pool.length };
+            pool.forEach(result => {
+                const key = keyOf(result);
+                if (key) counts[key] = (counts[key] || 0) + 1;
+            });
+            Array.from(select.options).forEach(option => {
+                const label = labels[option.value] || option.textContent;
+                option.textContent = `${label}（${counts[option.value] ?? 0}）`;
+            });
+        }
+
+        // 已启用的筛选项数量（两个下拉各自算一项）
+        function activeResultFilterCount() {
+            let count = 0;
+            if ((document.getElementById('statusFilter')?.value || 'all') !== 'all') count += 1;
+            if ((document.getElementById('resolutionFilter')?.value || 'all') !== 'all') count += 1;
+            return count;
+        }
+
+        function openFilterDialog() {
+            const modal = document.getElementById('filterModal');
+            if (!modal) return;
+            refreshFilterOptionCounts();
+            modal.classList.remove('hidden');
+            syncDialogScrollLock();
+            const closeBtn = document.getElementById('filterDialogClose');
+            if (closeBtn) closeBtn.focus();
+        }
+
+        function closeFilterDialog() {
+            const modal = document.getElementById('filterModal');
+            if (!modal) return;
+            modal.classList.add('hidden');
+            syncDialogScrollLock();
+        }
+
+        // 弹窗统一滚动锁：任一弹窗打开时锁定页面滚动
+        const DIALOG_IDS = ['detailModal', 'filterModal', 'logModal'];
+        function syncDialogScrollLock() {
+            const open = DIALOG_IDS.some(id => {
+                const dialog = document.getElementById(id);
+                return dialog && !dialog.classList.contains('hidden');
+            });
+            document.body.style.overflow = open ? 'hidden' : '';
+        }
+
+        function openLogDialog() {
+            const modal = document.getElementById('logModal');
+            if (!modal) return;
+            modal.classList.remove('hidden');
+            syncDialogScrollLock();
+            const container = document.getElementById('logContainer');
+            if (container) container.scrollTop = container.scrollHeight;
+            const closeBtn = document.getElementById('logDialogClose');
+            if (closeBtn) closeBtn.focus();
+        }
+
+        function closeLogDialog() {
+            const modal = document.getElementById('logModal');
+            if (!modal) return;
+            modal.classList.add('hidden');
+            syncDialogScrollLock();
         }
 
         function resetResultFilters() {
@@ -2650,11 +3223,27 @@ https://www.example.com/path/to/page"></textarea>
                 const total = currentResults.length;
                 const statusFilter = document.getElementById('statusFilter')?.value || 'all';
                 const resolutionFilter = document.getElementById('resolutionFilter')?.value || 'all';
+                const activeFilters = activeResultFilterCount();
                 const filtering = statusFilter !== 'all' || resolutionFilter !== 'all';
-                visibleCount.textContent = filtering
+                const countText = filtering
                     ? `共 ${total} 条 · 筛选出 ${visibleResults.length} 条`
                     : `共 ${total} 条`;
+                visibleCount.textContent = countText;
+                const filterHint = document.getElementById('filterDialogHint');
+                if (filterHint) filterHint.textContent = countText;
+                const filterBadge = document.getElementById('filterActiveBadge');
+                if (filterBadge) {
+                    filterBadge.textContent = String(activeFilters);
+                    filterBadge.classList.toggle('hidden', activeFilters === 0);
+                }
+                const filterButton = document.getElementById('btnOpenFilters');
+                if (filterButton) {
+                    filterButton.title = activeFilters > 0
+                        ? `已启用 ${activeFilters} 项筛选，点击调整`
+                        : '按查询状态和域名状态筛选表格结果';
+                }
             }
+            refreshFilterOptionCounts();
             updateExportCountHint();
             updateSelectionInfo();
         }
@@ -2728,6 +3317,80 @@ https://www.example.com/path/to/page"></textarea>
             if (Array.isArray(value)) value = value.join(', ');
             if (value === null || value === undefined || value === '') return '-';
             return String(value);
+        }
+
+        // 接口原始返回：JSON 美化 + 行号 + 高亮 + 复制
+        function escapeCodeHtml(text) {
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+
+        // 逐行高亮：JSON 字符串不能跨行，所以按行分词是安全的
+        function highlightJsonLine(line) {
+            return escapeCodeHtml(line).replace(
+                /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
+                (match, str, colon, literal, number) => {
+                    if (str) {
+                        const cls = colon ? 'code-key' : 'code-string';
+                        return `<span class="${cls}">${str}</span>${colon || ''}`;
+                    }
+                    if (literal) return `<span class="code-literal">${literal}</span>`;
+                    if (number) return `<span class="code-number">${number}</span>`;
+                    return match;
+                }
+            );
+        }
+
+        function renderRawResponse(value) {
+            const text = value === null || value === undefined ? '' : String(value).trim();
+            if (!text) return '<span class="detail-value">-</span>';
+            let language = '文本';
+            let display = text;
+            if (text.startsWith('{') || text.startsWith('[')) {
+                try {
+                    display = JSON.stringify(JSON.parse(text), null, 2);
+                    language = 'JSON';
+                } catch (error) {
+                    // 不是合法 JSON：按原始文本展示，仍带行号与复制
+                }
+            }
+            const lines = display.split('\n');
+            const body = lines.map((line, index) => {
+                const html = language === 'JSON' ? highlightJsonLine(line) : escapeCodeHtml(line);
+                return `<span class="code-line"><span class="code-line-number">${index + 1}</span>` +
+                    `<span class="code-line-text">${html}</span></span>`;
+            }).join('');
+            return `<div class="code-block" data-language="${language}">` +
+                `<div class="code-toolbar"><span class="code-lang">${language}</span>` +
+                `<span class="code-meta">${lines.length} 行</span>` +
+                `<button type="button" class="btn btn-sm btn-secondary code-copy-btn" onclick="copyCodeBlock(this)" ` +
+                `title="复制接口原始返回" aria-label="复制接口原始返回">⧉ 复制</button></div>` +
+                `<pre class="code-body"><code>${body}</code></pre></div>`;
+        }
+
+        async function copyCodeBlock(button) {
+            const block = button.closest('.code-block');
+            const text = block
+                ? Array.from(block.querySelectorAll('.code-line-text')).map(el => el.textContent).join('\n')
+                : '';
+            if (!text) {
+                showToast('暂无可复制的内容', 'info');
+                return;
+            }
+            let copied = false;
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(text);
+                    copied = true;
+                } else {
+                    copied = fallbackCopyText(text);
+                }
+            } catch (error) {
+                copied = fallbackCopyText(text);
+            }
+            showToast(copied ? '接口原始返回已复制' : '复制失败，请手动复制', copied ? 'success' : 'error');
         }
 
         function resultStatusText(result) {
@@ -2824,19 +3487,22 @@ https://www.example.com/path/to/page"></textarea>
                 ['错误备注', result.error],
                 ['接口原始返回', result.raw_response],
             ];
-            document.getElementById('detailGrid').innerHTML = fields.map(([label, value]) =>
-                `<div class="detail-item${['解析异常原因', '错误备注', '接口原始返回'].includes(label) ? ' full' : ''}">` +
-                `<span class="detail-label">${escapeHtml(label)}</span>` +
-                `<span class="detail-value">${escapeHtml(detailValue(value))}</span></div>`
-            ).join('');
+            document.getElementById('detailGrid').innerHTML = fields.map(([label, value]) => {
+                const full = ['解析异常原因', '错误备注', '接口原始返回'].includes(label);
+                const body = label === '接口原始返回'
+                    ? renderRawResponse(value)
+                    : `<span class="detail-value">${escapeHtml(detailValue(value))}</span>`;
+                return `<div class="detail-item${full ? ' full' : ''}">` +
+                    `<span class="detail-label">${escapeHtml(label)}</span>${body}</div>`;
+            }).join('');
             document.getElementById('detailModal').classList.remove('hidden');
-            document.body.style.overflow = 'hidden';
+            syncDialogScrollLock();
             document.querySelector('.detail-close-btn').focus();
         }
 
         function closeResultDetails() {
             document.getElementById('detailModal').classList.add('hidden');
-            document.body.style.overflow = '';
+            syncDialogScrollLock();
         }
         
         function updateStats(results) {
@@ -2903,7 +3569,6 @@ https://www.example.com/path/to/page"></textarea>
             currentOperation = 'retry';
             setTaskBusy(true);
             document.getElementById('progressSection').classList.add('active');
-            document.getElementById('logCard').style.display = 'block';
             syncOutlineVisibility();
             updateQueryActivity('processing', 'retry', 0, 0, 0);
             document.getElementById('progressFill').style.width = '0%';
@@ -3039,7 +3704,6 @@ https://www.example.com/path/to/page"></textarea>
             document.getElementById('resultsBody').innerHTML = '';
             document.getElementById('resultsCard').classList.add('hidden');
             document.getElementById('progressSection').classList.remove('active');
-            document.getElementById('logCard').style.display = 'none';
             syncOutlineVisibility();
             document.getElementById('progressFill').style.width = '0%';
             currentTaskId = null;
@@ -3316,6 +3980,8 @@ https://www.example.com/path/to/page"></textarea>
             const el = document.getElementById(id);
             if (!el) return;
             if (currentTab !== 'query') switchTab('query');
+            // 从大纲跳到查询配置时自动展开，否则只能看到折叠标题
+            if (id === 'configCard') setConfigCollapsed(false);
             setOutlineActive(id);
             el.scrollIntoView({ behavior: 'smooth', block: 'start' });
             setMobileSidebarOpen(false);
@@ -3332,7 +3998,7 @@ https://www.example.com/path/to/page"></textarea>
                     .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
                 if (visible && currentTab === 'query') setOutlineActive(visible.target.id);
             }, { rootMargin: '-15% 0px -65% 0px', threshold: [0, 0.2, 0.5] });
-            ['configCard', 'inputCard', 'logCard', 'resultsCard'].forEach(id => {
+            ['configCard', 'inputCard', 'resultsCard'].forEach(id => {
                 const section = document.getElementById(id);
                 if (section) observer.observe(section);
             });
@@ -3503,14 +4169,22 @@ https://www.example.com/path/to/page"></textarea>
         }
 
         document.addEventListener('keydown', event => {
-            const logCard = document.getElementById('logCard');
-            if (event.key === 'Escape' && logCard.classList.contains('log-card-fullscreen')) {
-                logCard.classList.remove('log-card-fullscreen');
-                updateLogFullscreenButton(false);
-            } else if (event.key === 'Escape' && !document.getElementById('detailModal').classList.contains('hidden')) {
-                closeResultDetails();
-            } else if (event.key === 'Escape') {
-                setMobileSidebarOpen(false);
+            if (event.key !== 'Escape') return;
+            const openDialog = DIALOG_IDS.find(id => {
+                const dialog = document.getElementById(id);
+                return dialog && !dialog.classList.contains('hidden');
+            });
+            if (openDialog === 'detailModal') closeResultDetails();
+            else if (openDialog === 'filterModal') closeFilterDialog();
+            else if (openDialog === 'logModal') closeLogDialog();
+            else {
+                const themePanel = document.getElementById('themePanel');
+                if (themePanel && !themePanel.hidden) {
+                    setThemePanelOpen(false);
+                    document.getElementById('themeToggle')?.focus();
+                } else {
+                    setMobileSidebarOpen(false);
+                }
             }
         });
         
@@ -3523,6 +4197,7 @@ https://www.example.com/path/to/page"></textarea>
         if (savedDomainDraft) document.getElementById('domains').value = savedDomainDraft;
         loadConfig().then(restoreCurrentTask);
         renderPlatformInfo();
+        initConfigCard();
         updateDomainLineNumbers();
         window.addEventListener('resize', updateDomainEditorHeight);
         setQueryMode('unlimited');

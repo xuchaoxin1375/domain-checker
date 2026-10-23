@@ -25,7 +25,7 @@ Base URL：`http://localhost:5000`（或启动日志输出的地址）。所有�
   "retry_delay": 2,
   "timeout": 15,                  // WHOIS/RDAP/DNS/HTTP 单次网络请求超时，范围 1-120
   "max_workers": 5,               // 每个任务的并发线程数，范围 1-32
-  "reuse_recent_seconds": 3600,   // 最近成功结果复用窗口（秒，默认 1 小时），0 表示关闭
+  "reuse_recent_seconds": 3600,   // 最近成功结果复用窗口（秒，默认 1 小时），0 表示关闭；网页用小时+分钟输入后换算
   "persistent_max_rounds": 5,     // 执着模式最多查询轮数（含首轮），1-20
   "proxy_enabled": false,
   "proxy_url": "http://127.0.0.1:7897",
@@ -54,7 +54,8 @@ Body 为任意配置键子集，类型自动转换；修改后自动写入 `data
 `timeout` 为 WHOIS、RDAP、DNS 和 HTTP 每次网络请求的超时秒数，服务端限制为 1-120 秒。
 它不是单域名或整批任务总时限；重试、RDAP 回退和后续探测会累计计入查询耗时。
 `max_workers` 为每个任务的线程池上限（1-32），任务开始后修改只影响后续任务；
-`reuse_recent_seconds` 控制最近成功结果的复用窗口（0-86400 秒，0 表示关闭）。
+`reuse_recent_seconds` 控制最近成功结果的复用窗口（0-86400 秒，0 表示关闭）；网页配置面板按
+「小时 + 分钟」两段输入，提交时换算成秒（如 2 小时 30 分钟 = `9000`），接口仍只接受秒。
 `persistent_max_rounds` 控制执着模式最多查询轮数（1-20，含首轮）。
 数值项超出范围会自动收敛到边界；无法转换为数字时返回 `400`，且整次请求不会部分生效。
 
@@ -294,8 +295,8 @@ HTTP 探测及等待时间合计的完整流水线耗时，因此可以大于 `q
 |------|------|------|
 | format | `csv`（默认）/ `xlsx` | CSV 带 BOM，Excel 可直接打开 |
 | filter | `all` / `success` / `normal` / `failed` / `timeout` / `not_registered` / `blocked` | 兼容旧调用：normal=成功且解析非失败；timeout=查询超时；not_registered=未注册；blocked=未解析 |
-| status | `success` / `not_registered` / `timeout` / `failed` / `invalid`（空=不限） | 与前端表格「状态筛选」语义一致，可与其他参数叠加 |
-| resolution | `resolved` / `held` / `unresolved` / `unknown` / `not_applicable`（空=不限） | 与前端表格「解析筛选」语义一致，可与其他参数叠加 |
+| status | `success` / `not_registered` / `timeout` / `failed` / `invalid`（空=不限） | 与前端表格「查询状态」筛选语义一致，可与其他参数叠加 |
+| resolution | `resolved` / `held` / `unresolved` / `unknown` / `not_applicable`（空=不限） | 与前端表格「域名状态」筛选语义一致，可与其他参数叠加 |
 | selected | 逗号分隔域名 | 先按选中域名过滤，再叠加 filter/status/resolution 条件 |
 
 优先取内存任务结果；任务不在内存时自动回退读数据库。无数据返回 `400`。
