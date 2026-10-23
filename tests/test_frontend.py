@@ -67,7 +67,7 @@ def test_query_progress_has_loading_duration_and_incremental_logs(client):
     assert 'id="queryElapsed"' in html
     assert 'function formatDuration(seconds)' in html
     assert 'log_after=${lastLogCursor}' in html
-    assert '已请求暂停，当前网络请求完成后生效' in html
+    assert '已请求暂停；在途网络请求返回后生效' in html
 
 
 def test_runtime_logs_have_line_numbers_copy_and_fullscreen(client):
@@ -355,3 +355,24 @@ def test_results_table_has_fixed_display_order_number_column(client):
     # 序号跟随当前展示顺序，不参与排序和拖拽换序
     assert "'select', 'row_number'" in html
     assert ':not([data-column="row_number"])' in html
+
+
+def test_pause_stops_log_polling_and_refresh_restores_task(client):
+    html = client.get('/').get_data(as_text=True)
+
+    # 暂停期间只轮询状态，不再反复拉取日志/结果
+    assert "const CURRENT_TASK_STORAGE_KEY = 'domainCheckerCurrentTask'" in html
+    assert '暂停期间只刷新状态，不拉取日志/结果' in html
+    assert "const skipResults = isPaused && status.status === 'processing'" in html
+    assert '等待在途网络请求返回' in html
+    # 任务 ID 持久化，刷新后从服务端恢复进度；任务丢失时回填历史域名
+    assert 'function saveCurrentTaskState()' in html
+    assert 'function restoreCurrentTask()' in html
+    assert 'loadConfig().then(restoreCurrentTask)' in html
+    assert '已恢复刷新前的查询进度' in html
+    assert 'function fillDomainsFromHistory(taskId)' in html
+    assert '回填域名' in html
+    assert '已中断' in html
+    # 轮询中发现任务因重启丢失时必须停止轮询并回填，而不是永久 404 轮询
+    assert 'if (statusResp.status === 404)' in html
+    assert '查询任务已中断（服务可能已重启）' in html

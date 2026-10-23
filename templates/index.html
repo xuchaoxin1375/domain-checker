@@ -1563,6 +1563,7 @@ https://www.example.com/path/to/page"></textarea>
     <script>
         let currentTaskId = null;
         let pollInterval = null;
+        const CURRENT_TASK_STORAGE_KEY = 'domainCheckerCurrentTask';
         let isPaused = false;
         let currentResults = [];
         let selectedDomains = new Set();
@@ -2002,6 +2003,7 @@ https://www.example.com/path/to/page"></textarea>
                 const data = await resp.json();
                 if (resp.ok) {
                     currentTaskId = data.task_id;
+                    saveCurrentTaskState();
                     showToast(data.message, 'info');
                     startPolling();
                 } else {
@@ -2016,6 +2018,110 @@ https://www.example.com/path/to/page"></textarea>
             }
         }
         
+        // 当前任务持久化：页面刷新后从 localStorage 恢复任务 ID，再向服务端拉取实时进度，
+        // 避免暂停中的查询因刷新页面而丢失。
+        function saveCurrentTaskState() {
+            if (!currentTaskId) return;
+            try {
+                localStorage.setItem(CURRENT_TASK_STORAGE_KEY, JSON.stringify({
+                    taskId: currentTaskId,
+                    operation: currentOperation,
+                    queryMode: currentQueryMode,
+                    platform: currentPlatform,
+                    queryTimeout: queryTimeoutValue(),
+                    savedAt: Date.now(),
+                }));
+            } catch (error) { /* localStorage 不可用时不影响查询 */ }
+        }
+
+        function loadSavedTaskState() {
+            try {
+                const value = JSON.parse(localStorage.getItem(CURRENT_TASK_STORAGE_KEY) || 'null');
+                return value && typeof value.taskId === 'string' ? value : null;
+            } catch (error) {
+                clearSavedTaskState();
+                return null;
+            }
+        }
+
+        function clearSavedTaskState() {
+            try { localStorage.removeItem(CURRENT_TASK_STORAGE_KEY); } catch (error) { /* 忽略 */ }
+        }
+
+        function fillDomainEditorFromResults(results) {
+            const editor = document.getElementById('domains');
+            if (!editor || editor.value.trim() || !results.length) return;
+            editor.value = results.map(result => result.domain).join('\n');
+            updateDomainLineNumbers();
+        }
+
+        async function restoreCurrentTask() {
+            const saved = loadSavedTaskState();
+            if (!saved) return;
+            try {
+                const statusResp = await fetch(`/api/status/${saved.taskId}`);
+                if (!statusResp.ok) {
+                    if (statusResp.status === 404) {
+                        await restoreTaskFromHistory(saved);
+                    }
+                    return;
+                }
+                const status = await statusResp.json();
+                currentTaskId = saved.taskId;
+                currentOperation = status.operation === 'completed'
+                    ? (saved.operation || 'query')
+                    : (status.operation || saved.operation || 'query');
+                currentQueryMode = status.query_mode || saved.queryMode || 'unlimited';
+                setQueryMode(currentQueryMode);
+                if (saved.platform) setPlatform(saved.platform);
+                if (saved.queryTimeout) document.getElementById('queryTimeout').value = saved.queryTimeout;
+                isPaused = Boolean(status.paused);
+                updatePauseButton();
+
+                document.getElementById('resultsCard').classList.remove('hidden');
+                document.getElementById('logCard').style.display = 'block';
+                document.getElementById('progressSection').classList.add('active');
+                syncOutlineVisibility();
+
+                if (status.status === 'processing') {
+                    setTaskBusy(true);
+                    startPolling();
+                } else {
+                    setTaskBusy(false);
+                    await pollTask(false);
+                    stopPolling();
+                }
+                showToast('已恢复刷新前的查询进度', 'info');
+            } catch (error) {
+                // 服务短暂不可用时保留记录，下一次刷新再尝试恢复
+                console.error('恢复查询进度失败', error);
+            }
+        }
+
+        async function restoreTaskFromHistory(saved) {
+            const resp = await fetch(`/api/history/${saved.taskId}`);
+            if (!resp.ok) {
+                clearSavedTaskState();
+                showToast('未找到刷新前的查询任务，请重新查询', 'warn');
+                return;
+            }
+            const data = await resp.json();
+            if (data.results && data.results.length) {
+                await loadHistoryDetail(saved.taskId);
+                showToast('查询任务已结束，已从历史记录恢复结果', 'info');
+                return;
+            }
+            const domains = String(data.history?.domains || '').trim();
+            if (domains) {
+                document.getElementById('domains').value = domains;
+                updateDomainLineNumbers();
+                showToast('原查询已中断，已恢复域名列表，可直接重新查询', 'warn');
+            } else {
+                showToast('未找到刷新前的查询进度，请重新查询', 'warn');
+            }
+            clearSavedTaskState();
+        }
+
         // 暂停/继续
         async function togglePause() {
             if (!currentTaskId) return;
@@ -2025,7 +2131,15 @@ https://www.example.com/path/to/page"></textarea>
                 if (resp.ok) {
                     isPaused = !isPaused;
                     updatePauseButton();
-                    showToast(isPaused ? '已请求暂停，当前网络请求完成后生效' : '已继续', 'info');
+                    saveCurrentTaskState();
+                    showToast(
+                        isPaused
+                            ? '已请求暂停；在途网络请求返回后生效，暂停期间不再刷新日志'
+                            : '已继续',
+                        'info'
+                    );
+                } else {
+                    showToast('暂停/继续操作失败', 'error');
                 }
             } catch (e) { showToast('操作失败', 'error'); }
         }
@@ -2064,9 +2178,11 @@ https://www.example.com/path/to/page"></textarea>
             if (state === 'completed') title = customTitle || `${action}完成`;
             if (isPaused && state === 'processing') title = `${action}已暂停`;
             document.getElementById('queryActivityTitle').textContent = title;
-            document.getElementById('queryActivityDetail').textContent = total > 0
+            let detail = total > 0
                 ? `${completed}/${total} 个域名已完成`
                 : '正在创建任务并分配查询线程';
+            if (isPaused && state === 'processing') detail += ' · 等待在途网络请求返回';
+            document.getElementById('queryActivityDetail').textContent = detail;
             document.getElementById('queryElapsed').textContent = formatDuration(elapsed);
         }
 
@@ -2090,14 +2206,18 @@ https://www.example.com/path/to/page"></textarea>
             pollInFlight = true;
             try {
                 const statusResp = await fetch(`/api/status/${currentTaskId}`);
+                if (statusResp.status === 404) {
+                    // 服务重启或热重载会丢掉内存任务；停止轮询并尽量从历史回填域名
+                    const missingTask = { taskId: currentTaskId, operation: currentOperation };
+                    stopPolling();
+                    currentTaskId = null;
+                    updateQueryActivity('cancelled', currentOperation, 0, 0, 0, '任务已中断');
+                    showToast('查询任务已中断（服务可能已重启），正在从历史回填域名', 'warn');
+                    await restoreTaskFromHistory(missingTask);
+                    return;
+                }
                 if (!statusResp.ok) throw new Error('任务状态读取失败');
                 const status = await statusResp.json();
-                // 状态完成后再读取结果，避免并行请求拿到完成前的旧结果快照。
-                const resultsResp = await fetch(
-                    `/api/results/${currentTaskId}?log_level=${currentLogLevel}&log_after=${lastLogCursor}`
-                );
-                if (!resultsResp.ok) throw new Error('任务结果读取失败');
-                const results = await resultsResp.json();
                 if (status.operation !== 'completed') currentOperation = status.operation;
 
                 document.getElementById('progressFill').style.width = status.progress + '%';
@@ -2110,12 +2230,26 @@ https://www.example.com/path/to/page"></textarea>
                     updatePauseButton();
                 }
 
-                if (results.logs && results.logs.length) updateLogs(results.logs);
-                lastLogCursor = results.log_cursor ?? lastLogCursor;
+                // 状态完成后再读取结果，避免并行请求拿到完成前的旧结果快照。
+                // 暂停期间只刷新状态，不拉取日志/结果：在途网络请求仍可能返回，
+                // 反复拉取会让用户误以为暂停没有生效；继续后再按日志游标补齐。
+                const skipResults = isPaused && status.status === 'processing'
+                    && currentResults.length > 0;
+                if (!skipResults) {
+                    const resultsResp = await fetch(
+                        `/api/results/${currentTaskId}?log_level=${currentLogLevel}&log_after=${lastLogCursor}`
+                    );
+                    if (!resultsResp.ok) throw new Error('任务结果读取失败');
+                    const results = await resultsResp.json();
 
-                if (results.refresh || results.results.length !== currentResults.length) {
-                    currentResults = results.results;
-                    renderResults();
+                    if (results.logs && results.logs.length) updateLogs(results.logs);
+                    lastLogCursor = results.log_cursor ?? lastLogCursor;
+
+                    if (results.refresh || results.results.length !== currentResults.length) {
+                        currentResults = results.results;
+                        renderResults();
+                    }
+                    fillDomainEditorFromResults(currentResults);
                 }
 
                 updateQueryActivity(
@@ -2601,6 +2735,7 @@ https://www.example.com/path/to/page"></textarea>
                 showToast(data.message, 'info');
                 if (data.started) {
                     markDomainsQueuedForRetry(data.domains || []);
+                    saveCurrentTaskState();
                     startPolling();
                 } else {
                     updateQueryActivity('completed', 'retry', 0, 0, 0, data.message);
@@ -2733,6 +2868,7 @@ https://www.example.com/path/to/page"></textarea>
             currentOperation = 'query';
             sortState = { column: null, ascending: true };
             document.querySelectorAll('th').forEach(th => { th.classList.remove('sorted'); th.querySelector('.sort-icon').textContent = '⇅'; });
+            clearSavedTaskState();
             stopPolling();
         }
         
@@ -2759,6 +2895,14 @@ https://www.example.com/path/to/page"></textarea>
                     const date = new Date(h.created_at).toLocaleString('zh-CN');
                     const domains = (h.domains || '').split('\n').slice(0, 3).join(', ');
                     const domainsShort = domains.length > 60 ? domains.slice(0, 60) + '...' : domains;
+                    const statusText = h.status === 'interrupted'
+                        ? '已中断'
+                        : (h.status === 'processing' ? '处理中' : '已完成');
+                    const hasResults = Number(h.results_count) > 0;
+                    const actions = hasResults
+                        ? `<button class="btn btn-sm btn-primary" onclick="loadHistoryDetail('${h.task_id}')">查看</button>
+                           <button class="btn btn-sm btn-success" onclick="exportHistory('${h.task_id}')">导出</button>`
+                        : `<button class="btn btn-sm btn-secondary" onclick="fillDomainsFromHistory('${h.task_id}')">回填域名</button>`;
                     
                     return `
                         <div class="history-item" data-task-id="${h.task_id}">
@@ -2769,15 +2913,14 @@ https://www.example.com/path/to/page"></textarea>
                             </div>
                             <div class="history-info">
                                 <div class="history-domain" title="${escapeHtml(h.domains)}">${domainsShort}</div>
-                                <div class="history-meta">${date} · 共 ${h.domain_count} 个域名</div>
+                                <div class="history-meta">${date} · 共 ${h.domain_count} 个域名 · ${statusText}</div>
                             </div>
                             <div class="history-stats">
                                 <span class="success">✓ ${h.success_count}</span>
                                 <span class="failed">✗ ${h.failed_count}</span>
                             </div>
                             <div class="history-actions">
-                                <button class="btn btn-sm btn-primary" onclick="loadHistoryDetail('${h.task_id}')">查看</button>
-                                <button class="btn btn-sm btn-success" onclick="exportHistory('${h.task_id}')">导出</button>
+                                ${actions}
                             </div>
                         </div>
                     `;
@@ -2853,6 +2996,24 @@ https://www.example.com/path/to/page"></textarea>
             } catch (e) { showToast('加载失败: ' + e.message, 'error'); }
         }
         
+        async function fillDomainsFromHistory(taskId) {
+            try {
+                const resp = await fetch(`/api/history/${taskId}`);
+                const data = await resp.json();
+                const domains = String(data.history?.domains || '').trim();
+                if (!domains) {
+                    showToast('该历史记录没有可回填的域名', 'error');
+                    return;
+                }
+                document.getElementById('domains').value = domains;
+                updateDomainLineNumbers();
+                switchTab('query');
+                showToast(`已回填 ${domains.split('\n').length} 个域名，可重新查询`, 'info');
+            } catch (error) {
+                showToast('回填失败: ' + error.message, 'error');
+            }
+        }
+
         function exportHistory(taskId) {
             const format = document.getElementById('historyExportFormat')?.value || 'csv';
             window.location.href = `/api/export/${taskId}?format=${format}`;
@@ -3145,7 +3306,7 @@ https://www.example.com/path/to/page"></textarea>
         
         // 初始化
         loadTheme();
-        loadConfig();
+        loadConfig().then(restoreCurrentTask);
         renderPlatformInfo();
         updateDomainLineNumbers();
         setQueryMode('unlimited');

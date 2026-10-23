@@ -46,7 +46,7 @@ flowchart TD
     Parse --> Task["创建 task_storage<br/>全部域名 query_state = queued"]
     Task --> Thread["后台线程 process_domains_async"]
     Thread --> History["save_history<br/>记录 processing 历史"]
-    Thread --> Pool["ThreadPoolExecutor<br/>提交域名"]
+    Thread --> Pool["守护工作线程<br/>从队列取域名"]
     Pool --> Stage["worker 取得域名<br/>query_state = querying"]
     Stage --> Single["process_single_domain<br/>记录单域名时间与耗时"]
     Single --> Dispatch{"查询平台"}
@@ -77,6 +77,10 @@ flowchart TD
   探测前和结果提交前均有协作式检查点。已经发出的同步网络请求无法强制中断，会在当前请求返回后停住；任务启动线程
   使用 `setdefault`，避免覆盖用户刚提交任务后立即点击的暂停请求。暂停期间未完成结果行显示“已暂停”，继续后恢复
   原来的排队或查询阶段；终止则显示“已终止”，已完成行不受影响
+- 暂停期间前端只轮询 `/api/status`，不拉取 `/api/results`；继续后再按 `log_after` 补齐日志，
+  避免在途网络请求返回时日志区持续刷新
+- 前端把当前 `task_id`、查询模式和超时保存在 `localStorage`；刷新页面后重新拉取状态与结果恢复进度。
+  服务重启导致内存任务丢失时，历史页显示“已中断”并支持“回填域名”，无需手工重输
 - 重查（retry/retry-failed）：任务重新进入 `processing`，使用同一受控线程池按"同域名覆盖、
   否则追加"更新结果，并记录独立的操作进度与耗时；任务不在内存时先从 SQLite 历史恢复
 - `retry-failed` 同时包含查询失败/超时/无效结果，以及注册数据查询成功但 `resolved=None` 的 DNS 未知结果
@@ -131,6 +135,8 @@ SQLite（`query_history` + `query_results`），表结构见 `db.init_db()` 的 
 - `query_results` 按 `task_id` 关联；`save_results` 对同一任务整体覆盖写入；
   `idx_query_results_domain_created` 支撑最近成功结果的复用查询
 - `query_state` 是内存中的实时执行阶段，不写入 SQLite；历史结果均视为 `completed`
+- 服务启动时 `mark_interrupted_tasks()` 把上个进程遗留的 `processing` 历史标记为
+  `interrupted`（内存任务无法跨进程恢复）；这类记录保留域名清单但没有结果明细
 - 历史批量删除在同一 SQLite 事务中先删明细再删主记录；清理全部和删除运行中任务互斥
 - `resolved` 存 `1/0/NULL` 对应 `True/False/None`（API 返回时注意转换）
 - `whois_status` 保留 WHOIS 原始状态，`hold_status` 记录 `clientHold/serverHold`，
@@ -144,7 +150,9 @@ SQLite（`query_history` + `query_results`），表结构见 `db.init_db()` 的 
 
 ## 并发模型
 
-- Flask `threaded=True`；批任务入口线程为 daemon，域名查询由 `ThreadPoolExecutor` 管理
+- Flask `threaded=True`；批任务入口线程与域名工作线程均为 daemon，域名查询由固定数量的守护线程
+  从共享队列取任务。这样调试重载或进程退出时，在途网络请求不会阻止旧进程结束；未完成任务在下次
+  启动时标记为 `interrupted`，不会出现“旧进程继续跑查询、新进程无法服务”的幽灵状态
 - 实际监听进程在启动和正常退出时写 `operations.log`；debug 重载父进程不重复写启动记录
 - 共享状态保护：`config_lock`（CONFIG 读写）、`task_lock`（task_storage 读写）
 - 写日志/改先决步骤时注意：在 `task_lock` 内不做数据库 IO（完成落库在锁外执行）

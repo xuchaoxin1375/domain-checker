@@ -63,10 +63,27 @@ python cli.py --help
 ## 改动的完成 checklist
 
 - [ ] `pytest` 与 `ruff check .` 全绿
+- [ ] **检查服务监控状况**：确认服务仍在监听、`/api/config` 返回正常、`/api/operations` 与运行日志
+      没有持续报错或异常重启循环，且没有卡在 `processing` 的任务；服务未运行时在交付说明中
+      明确写出“未做在线检查”及原因
 - [ ] 涉及 API 或行为：更新 `docs/API.md` / `docs/ARCHITECTURE.md` / README 相应表格
 - [ ] 面向用户的文案：同步前端、导出、`README` 状态说明
 - [ ] 新增配置项：写入 `settings.CONFIG` 默认值、类型转换分支（api_config）、README 配置表
 - [ ] 在 `CHANGELOG.md` 的 `[Unreleased]` 区补一条
+
+## 交付前服务监控检查
+
+每次交付（包括只改文档）都要执行，步骤与排障方法见
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md#交付与日常健康检查)：
+
+1. 端口仍在监听：Windows `Get-NetTCPConnection -LocalPort 5000 -State Listen`；类 Unix
+   `lsof -nP -iTCP:5000 -sTCP:LISTEN` 或 `ss -ltnp 'sport = :5000'`。
+2. `GET /api/config` 返回 200，`server.bind_host`/`port` 与实际监听一致。
+3. `GET /api/operations?limit=10` 无反复启动/终止循环；核对 `data/operations.log` 与终端日志
+   没有持续异常。
+4. `GET /api/history?limit=10` 检查是否有长期停留在 `processing` 的任务（服务启动后应自动
+   标记为 `interrupted`）；如仍存在，先定位是否有多进程同时写库或旧版本服务未重启。
+5. 服务未运行时不得假装检查通过；在交付说明写明“未做在线健康检查”和原因（如仅离线改代码）。
 
 ## 常见任务速查
 

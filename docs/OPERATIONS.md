@@ -16,6 +16,34 @@
 实际监听进程，避免同一次启动出现父子进程两条记录。通过 `Ctrl+C` 正常退出会记录“终止”。
 操作系统强制结束、断电或进程崩溃时无法保证写入最后一条终止记录。
 
+## 交付与日常健康检查
+
+每次交付、部署或排障后执行；服务未运行时应明确记录“未做在线检查”，不要把未检查当成正常。
+
+```bash
+curl -fsS http://127.0.0.1:5000/api/config
+curl -fsS "http://127.0.0.1:5000/api/operations?limit=10"
+curl -fsS "http://127.0.0.1:5000/api/history?limit=10"
+```
+
+- `/api/config` 返回 200，且 `server.bind_host`、`server.port` 与实际监听一致。
+- `/api/operations` 不应出现短时间内反复启动/终止；结合终端与服务日志判断是否有异常重启。
+- `/api/history` 不应长期存在 `status=processing` 的记录。服务启动时会把上个进程遗留的
+  `processing` 任务标记为 `interrupted`；这类记录没有结果，可在历史页点“回填域名”后重新查询。
+- 终端或运行日志不应持续出现 traceback、代理错误，或整批 DNS/WHOIS 失败。
+- 端口显示监听但请求超时且返回 0 字节时，通常是调试重载的父进程仍占着端口、服务子进程已退出
+  或卡住。用进程列表确认父子 PID（Windows `Get-CimInstance Win32_Process`），停止整个进程树后
+  重启；不要只杀子进程，否则父进程会继续占用 `5000` 端口。
+- 页面刷新后，正在查询或已暂停的任务会通过浏览器本地记录恢复进度；服务重启导致内存任务
+  丢失时，历史页会显示“已中断”，并可从历史中回填域名，无需手工重新输入。
+
+Windows PowerShell 中优先使用 `curl.exe`（`curl` 可能是 `Invoke-WebRequest` 的别名），
+也可以使用：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:5000/api/config
+```
+
 ## Windows
 
 ### 查询监听端口

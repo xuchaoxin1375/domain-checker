@@ -96,6 +96,27 @@ def init_db():
     logger.info(f"数据库初始化完成: {settings.DB_PATH}")
 
 
+def mark_interrupted_tasks() -> int:
+    """将上次进程遗留的 processing 历史标记为 interrupted，返回标记条数。
+
+    运行中任务只存在于内存；服务启动时仍为 processing 的历史必然已随进程中断，
+    不应长期显示为“处理中”。本函数只在应用启动时调用，不处理当前进程内的任务。
+    """
+    conn = sqlite3.connect(str(settings.DB_PATH))
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE query_history
+        SET status = 'interrupted', completed_at = COALESCE(completed_at, ?)
+        WHERE status = 'processing'
+    ''', (datetime.now().isoformat(),))
+    count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    if count:
+        logger.warning(f"已将 {count} 条上次进程遗留的查询标记为已中断")
+    return count
+
+
 def save_history(task_id: str, domains: list, status: str = 'processing',
                  completed_at: 'str | None' = None):
     """保存查询历史。"""

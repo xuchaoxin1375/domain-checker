@@ -24,6 +24,7 @@ from .db import (
     get_history,
     get_history_detail,
     init_db,
+    mark_interrupted_tasks,
 )
 from .domains import parse_domain_input
 from .export import create_export_file
@@ -115,6 +116,12 @@ def create_app() -> Flask:
 
     # 初始化数据库并加载持久化配置（init_db 幂等，兼容 debug reloader 双进程）
     init_db()
+    # 进程启动后，内存中的运行任务已不存在；把上次遗留的 processing 历史标记为已中断。
+    # 数据库短暂锁冲突不应阻止服务启动。
+    try:
+        mark_interrupted_tasks()
+    except Exception as exc:
+        logger.warning(f'标记遗留任务失败: {exc}')
     load_config_from_file()
 
     _register_routes(flask_app)
@@ -315,7 +322,7 @@ def _register_routes(flask_app: Flask):
                 task['logs'].append({
                     'time': datetime.now().strftime('%H:%M:%S'),
                     'level': 'warn',
-                    'message': '⏸ 已请求暂停；当前网络请求完成后停止进入下一阶段'
+                    'message': '⏸ 已请求暂停；在途网络请求返回后停止进入下一阶段'
                 })
         return jsonify({'message': '已暂停', 'paused': True})
 

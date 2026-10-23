@@ -25,6 +25,7 @@
 | 前端 | `tests/test_frontend.py` + JavaScript 语法检查 |
 | 数据库/导出 | 对应测试，确认使用临时数据目录 |
 | 文档 | 链接、命令、状态/API 文案与代码一致 |
+| 每次交付 | 服务监控检查：端口监听、`/api/config`、`/api/operations`、运行日志无异常、无卡在 `processing` 的任务 |
 
 交付前运行：
 
@@ -33,6 +34,11 @@ pytest -q
 ruff check .
 git diff --check
 ```
+
+并完成 [`AGENTS.md`](../AGENTS.md#交付前服务监控检查) 中的服务监控检查：
+服务运行中时访问 `/api/config`、`/api/operations?limit=10`、`/api/history?limit=10`，确认无异常
+重启循环、持续报错或遗留的 `processing` 任务；服务未运行时在交付说明中明确说明原因，
+不能把“未检查”写成“正常”。
 
 最后更新 `CHANGELOG.md` 的 `[Unreleased]`，并按 [`agent-handoff.md`](agent-handoff.md) 汇总交接信息。
 

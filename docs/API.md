@@ -172,6 +172,8 @@ HTTP 探测及等待时间合计的完整流水线耗时，因此可以大于 `q
 
 暂停会在当前同步网络请求返回后的检查点生效，阻止进入下一阶段和提交结果；未完成行显示为“已暂停”，继续后恢复原执行阶段。
 暂停期间 `elapsed_seconds` 保持冻结，暂停区间不计入最终 `duration_seconds` 和单域名查询耗时。
+已发出的同步网络请求无法强制中断，因此暂停生效前可能仍有一条在途结果返回；客户端在
+`paused=true` 时应只轮询 `/api/status`，继续后再用 `log_after` 补齐日志，避免日志区持续刷新。
 `cancel` 置任务为 `cancelled` 并阻止后续域名启动，未完成行显示为“已终止”；已完成行不变。
 
 ### POST /api/retry/{task_id}
@@ -221,6 +223,9 @@ HTTP 探测及等待时间合计的完整流水线耗时，因此可以大于 `q
 ```
 
 `created_at` 为本地 naive ISO 时间字符串。
+`status` 为 `processing`（当前进程内仍在运行）、`completed`（正常完成）或 `interrupted`
+（上次进程遗留、启动时已自动标记，通常没有结果明细）。`interrupted` 记录仍保留域名清单，
+可通过历史详情取得 `domains` 后重新查询。
 
 ### GET /api/history/{task_id}
 

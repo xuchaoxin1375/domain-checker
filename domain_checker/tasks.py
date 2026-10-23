@@ -4,8 +4,8 @@ import logging
 import random
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from queue import Empty, Queue
 
 from .checker import process_single_domain
 from .db import find_recent_success_results, save_history, save_results, update_history_counts
@@ -171,26 +171,51 @@ def _run_pool(domains: list[str], task_id: str, max_workers: int,
               track_operation: bool = False, query_mode: str = 'unlimited',
               query_timeout: int | None = None, platform: str = 'rdap',
               reuse_map: dict[str, dict] | None = None) -> None:
-    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix=f'domain-{task_id}') as executor:
-        futures = {
-            executor.submit(
-                _process_domain_worker, domain, task_id, query_mode, query_timeout, platform,
-                (reuse_map or {}).get(domain),
-            ): domain
-            for domain in domains
-        }
-        for future in as_completed(futures):
-            domain = futures[future]
+    """用守护线程池处理域名。
+
+    使用守护线程而不是 ``ThreadPoolExecutor``：调试重载或进程退出时，在途查询线程
+    不能阻止旧进程结束，否则旧进程会继续查询并占用数据库/端口，新进程无法正常服务。
+    任务仍是协作式暂停/取消；进程退出时未完成任务由下次启动标记为 interrupted。
+    """
+    reuse_map = reuse_map or {}
+    work_queue: Queue[str] = Queue()
+    for domain in domains:
+        work_queue.put(domain)
+
+    def worker() -> None:
+        while True:
             try:
-                future.result()
+                domain = work_queue.get_nowait()
+            except Empty:
+                return
+            try:
+                _process_domain_worker(
+                    domain, task_id, query_mode, query_timeout, platform,
+                    reuse_map.get(domain),
+                )
             except Exception as exc:
                 logger.exception(f"[{domain}] worker 处理异常")
                 _record_worker_failure(domain, task_id, exc)
-            if track_operation:
-                with task_lock:
-                    task = task_storage.get(task_id)
-                    if task and task['status'] != 'cancelled':
-                        task['operation_completed'] += 1
+            finally:
+                work_queue.task_done()
+                if track_operation:
+                    with task_lock:
+                        task = task_storage.get(task_id)
+                        if task and task['status'] != 'cancelled':
+                            task['operation_completed'] += 1
+
+    threads = [
+        threading.Thread(
+            target=worker,
+            name=f'domain-{task_id}-{index}',
+            daemon=True,
+        )
+        for index in range(max(1, int(max_workers)))
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
 
 
 def _complete_operation(task_id: str, started: float, label: str, work_count: int) -> tuple[list, int, int] | None:

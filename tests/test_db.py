@@ -99,6 +99,26 @@ def test_batch_delete_and_clear_all_use_single_database(tmp_path, monkeypatch):
     assert db.get_history() == []
 
 
+def test_mark_interrupted_tasks_marks_orphaned_processing_rows(tmp_path, monkeypatch):
+    isolated_db = tmp_path / 'interrupted.db'
+    monkeypatch.setattr(db.settings, 'DB_PATH', isolated_db)
+    db.init_db()
+    db.save_history('ORPHAN01', ['a.com'], 'processing')
+    db.save_history('FINISHED01', ['b.com'], 'completed', completed_at='2026-01-01T00:00:00')
+
+    marked = db.mark_interrupted_tasks()
+
+    assert marked == 1
+    orphan, _ = db.get_history_detail('ORPHAN01')
+    assert orphan['status'] == 'interrupted'
+    assert orphan['completed_at']
+    finished, _ = db.get_history_detail('FINISHED01')
+    assert finished['status'] == 'completed'
+    assert finished['completed_at'] == '2026-01-01T00:00:00'
+    # 幂等：再次启动不应重复标记
+    assert db.mark_interrupted_tasks() == 0
+
+
 class TestRecentSuccessReuse:
     """最近成功结果复用：只取 TTL 内成功且 DNS 有结论的最新记录。"""
 

@@ -372,6 +372,33 @@ def test_run_pool_actually_uses_configured_workers(monkeypatch):
             task_storage.pop('POOLCONC', None)
 
 
+def test_run_pool_workers_are_daemon_threads(monkeypatch):
+    """进程退出/调试重载时，查询线程不能阻止旧进程结束。"""
+    domain = 'daemon-check.com'
+    now = '2026-08-01T10:00:00'
+    with task_lock:
+        task_storage['DAEMON01'] = {
+            'status': 'processing', 'total': 1, 'completed': 0,
+            'results': [create_queued_result(domain)], 'logs': [], 'refresh': False,
+            'platform': 'rdap', 'created_at': now, 'completed_at': None,
+            'duration_seconds': None,
+        }
+
+    daemon_flags = []
+
+    def fake_process(domain, task_id, **_kwargs):
+        daemon_flags.append(threading.current_thread().daemon)
+        return {'domain': domain, 'status': 'success'}
+
+    monkeypatch.setattr('domain_checker.tasks.process_single_domain', fake_process)
+    try:
+        _run_pool([domain], 'DAEMON01', max_workers=1)
+        assert daemon_flags == [True]
+    finally:
+        with task_lock:
+            task_storage.pop('DAEMON01', None)
+
+
 def test_worker_config_clamps_unsafe_values(monkeypatch):
     monkeypatch.setitem(CONFIG, 'max_workers', 999)
     monkeypatch.setitem(CONFIG, 'rate_limit_delay', -5)
