@@ -617,6 +617,8 @@
         .badge-querying { display: inline-flex; align-items: center; gap: 6px; background: rgba(59,130,246,0.14); color: #2563eb; }
         .badge-paused { background: rgba(245,158,11,0.18); color: var(--warning); }
         .badge-cancelled { background: rgba(107,114,128,0.16); color: var(--text-secondary); }
+        .badge-cache { background: rgba(59,130,246,0.14); color: var(--primary); }
+        .badge-online { background: rgba(40,167,69,0.15); color: var(--success); }
         .badge-querying::before {
             content: '';
             width: 10px;
@@ -1395,6 +1397,7 @@ https://www.example.com/path/to/page"></textarea>
                             <col data-column="domain" style="width: 300px">
                             <col data-column="query_time" style="width: 155px">
                             <col data-column="query_duration_seconds" style="width: 95px">
+                            <col data-column="query_source" style="width: 100px">
                             <col data-column="query_state" style="width: 150px">
                             <col data-column="status" style="width: 110px">
                             <col data-column="resolved" style="width: 180px">
@@ -1415,6 +1418,7 @@ https://www.example.com/path/to/page"></textarea>
                                 <th data-column="domain" data-sort="domain" onclick="sortTable('domain')">域名<span class="sort-icon">⇅</span></th>
                                 <th data-column="query_time" data-sort="query_time" onclick="sortTable('query_time')">查询时间<span class="sort-icon">⇅</span></th>
                                 <th data-column="query_duration_seconds" data-sort="query_duration_seconds" onclick="sortTable('query_duration_seconds')">查询耗时<span class="sort-icon">⇅</span></th>
+                                <th data-column="query_source" data-sort="query_source" onclick="sortTable('query_source')">查询来源<span class="sort-icon">⇅</span></th>
                                 <th data-column="query_state" data-sort="query_state" onclick="sortTable('query_state')">状态<span class="sort-icon">⇅</span></th>
                                 <th data-column="status" data-sort="status" onclick="sortTable('status')">注册状态<span class="sort-icon">⇅</span></th>
                                 <th data-column="resolved" data-sort="resolved" onclick="sortTable('resolved')">解析<span class="sort-icon">⇅</span></th>
@@ -1591,10 +1595,12 @@ https://www.example.com/path/to/page"></textarea>
         let suppressColumnSort = false;
         let draggedColumnKey = null;
         const defaultResultColumnOrder = [
-            'select', 'row_number', 'domain', 'query_time', 'query_duration_seconds', 'query_state',
-            'status', 'resolved', 'whois_status', 'registrar', 'contact_email',
+            'select', 'row_number', 'domain', 'query_time', 'query_duration_seconds', 'query_source',
+            'query_state', 'status', 'resolved', 'whois_status', 'registrar', 'contact_email',
             'registration_date', 'expiration_date', 'name_servers', 'error'
         ];
+        // 老用户已保存列顺序时的插入锚点：新列跟随在查询耗时之后，而不是追加到末尾
+        const defaultColumnAnchors = { query_source: 'query_duration_seconds' };
         
         // 平台信息（implemented=false 的平台未接入专用接口，实际自动使用 WHOIS 标准协议）
         const platforms = {
@@ -1808,6 +1814,11 @@ https://www.example.com/path/to/page"></textarea>
             return 4;
         }
 
+        function querySourceSortRank(result) {
+            if ((result.query_state || 'completed') !== 'completed') return 2;
+            return result.reused ? 0 : 1;
+        }
+
         // 表格排序
         function sortTable(column) {
             if (suppressColumnSort) return;
@@ -1845,6 +1856,11 @@ https://www.example.com/path/to/page"></textarea>
                     return sortState.ascending
                         ? resolutionSortRank(a) - resolutionSortRank(b)
                         : resolutionSortRank(b) - resolutionSortRank(a);
+                }
+                if (column === 'query_source') {
+                    return sortState.ascending
+                        ? querySourceSortRank(a) - querySourceSortRank(b)
+                        : querySourceSortRank(b) - querySourceSortRank(a);
                 }
                 
                 // 日期比较：空值始终排在最后
@@ -2440,6 +2456,12 @@ https://www.example.com/path/to/page"></textarea>
                 
                 const checked = selectedDomains.has(r.domain) ? 'checked' : '';
                 const pendingDisabled = pending ? 'disabled' : '';
+                const sourceLabel = resultSourceLabel(r);
+                const sourceBadge = sourceLabel === '本地缓存'
+                    ? '<span class="badge badge-cache" title="复用本地历史结果，未发起网络请求">本地缓存</span>'
+                    : sourceLabel === '在线查询'
+                        ? '<span class="badge badge-online" title="本次任务实时联网查询">在线查询</span>'
+                        : '<span class="badge badge-queued">待查询</span>';
                 
                 tr.innerHTML = `
                     <td class="checkbox-cell" data-column="select"><input type="checkbox" ${checked} ${pendingDisabled} onchange="toggleSelect('${escapeHtml(r.domain)}')"></td>
@@ -2447,6 +2469,7 @@ https://www.example.com/path/to/page"></textarea>
                     <td data-column="domain"><span class="domain-cell-wrap"><a class="domain-cell" href="https://${escapeHtml(r.domain)}" target="_blank" rel="noopener noreferrer" title="打开网站">${escapeHtml(r.domain)}</a><button type="button" class="retry-domain-btn" ${pendingDisabled} onclick="retrySingle('${escapeHtml(r.domain)}')" title="重新查询此域名" aria-label="重新查询此域名">↻ 重查</button><button type="button" class="detail-result-btn" onclick="showResultDetails('${escapeHtml(r.domain)}')" title="查看详细结果" aria-label="查看 ${escapeHtml(r.domain)} 的详细结果">详细结果</button><button type="button" class="copy-domain-btn" onclick="copyDomain(this, '${escapeHtml(r.domain)}')" title="复制域名" aria-label="复制域名 ${escapeHtml(r.domain)}">⧉</button></span></td>
                     <td class="query-time-cell" data-column="query_time">${escapeHtml(r.query_time || '')}</td>
                     <td class="query-time-cell" data-column="query_duration_seconds">${formatResultDuration(r.query_duration_seconds)}</td>
+                    <td data-column="query_source">${sourceBadge}</td>
                     <td data-column="query_state">${statusBadge}</td>
                     <td data-column="status">${registrationBadge}</td>
                     <td data-column="resolved">${resolvedBadge}</td>
@@ -2462,6 +2485,7 @@ https://www.example.com/path/to/page"></textarea>
                 const copyValues = [
                     index + 1,
                     r.domain, r.query_time, formatResultDuration(r.query_duration_seconds),
+                    resultSourceLabel(r),
                     resultStatusText(r), resultRegistrationText(r), resultResolutionText(r),
                     r.whois_status, r.registrar, r.contact_email,
                     r.registration_date, r.expiration_date, r.name_servers, r.error,
@@ -2580,6 +2604,11 @@ https://www.example.com/path/to/page"></textarea>
             return '格式无效';
         }
 
+        function resultSourceLabel(result) {
+            if ((result.query_state || 'completed') !== 'completed') return '待查询';
+            return result.reused ? '本地缓存' : '在线查询';
+        }
+
         function resultRegistrationText(result) {
             if (result.status === 'success') return '已注册';
             if (result.status === 'not_registered') return '未注册';
@@ -2648,8 +2677,10 @@ https://www.example.com/path/to/page"></textarea>
                 ['DNS 记录', result.dns_records],
                 ['查询时间', result.query_time],
                 ['查询耗时', formatResultDuration(result.query_duration_seconds)],
-                ['结果来源', result.reused ? '复用最近成功结果，未发起网络请求' : '本次实时查询'],
-                ['结果来源', result.reused ? '复用最近成功结果，未发起网络请求' : '本次实时查询'],
+                ['结果来源', result.reused
+                    ? '本地缓存（复用最近成功结果，未发起网络请求）'
+                    : ((result.query_state || 'completed') !== 'completed'
+                        ? '待查询' : '在线查询（本次实时联网）')],
                 ['解析异常原因', result.block_reason],
                 ['错误备注', result.error],
                 ['接口原始返回', result.raw_response],
@@ -3180,7 +3211,10 @@ https://www.example.com/path/to/page"></textarea>
                 !fixed.has(key) && known.has(key) && saved.indexOf(key) === index
             );
             defaultResultColumnOrder.forEach(key => {
-                if (!fixed.has(key) && !movable.includes(key)) movable.push(key);
+                if (fixed.has(key) || movable.includes(key)) return;
+                const anchorIndex = movable.indexOf(defaultColumnAnchors[key]);
+                if (anchorIndex >= 0) movable.splice(anchorIndex + 1, 0, key);
+                else movable.push(key);
             });
             return ['select', 'row_number', ...movable];
         }

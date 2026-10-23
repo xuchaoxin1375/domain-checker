@@ -106,6 +106,22 @@ def test_results_show_query_time_duration_and_domain_hold_status(client):
     assert 'badge-timeout' in html
 
 
+def test_results_show_query_source_column(client):
+    html = client.get('/').get_data(as_text=True)
+
+    assert 'data-column="query_source" style="width: 100px"' in html
+    assert 'data-sort="query_source"' in html
+    assert '查询来源' in html
+    assert 'function resultSourceLabel(result)' in html
+    assert "return result.reused ? '本地缓存' : '在线查询';" in html
+    assert "if (column === 'query_source')" in html
+    assert "defaultColumnAnchors = { query_source: 'query_duration_seconds' }" in html
+    assert "data-column=\"query_source\">${sourceBadge}" in html
+    assert 'badge-cache' in html and 'badge-online' in html
+    assert '本地缓存' in html and '在线查询' in html
+    assert 'resultSourceLabel(r),' in html
+
+
 def test_result_filter_and_progress_are_in_results_card(client):
     html = client.get('/').get_data(as_text=True)
 
@@ -346,7 +362,7 @@ def test_concurrency_and_reuse_settings_are_wired(client):
     # 命中复用的结果在状态列可见，详细结果说明来源
     assert "✓ 查询成功${r.reused ? " in html
     assert '查询成功（复用最近结果）' in html
-    assert "['结果来源', result.reused ?" in html
+    assert "['结果来源', result.reused" in html
 
 
 def test_results_table_has_fixed_display_order_number_column(client):
