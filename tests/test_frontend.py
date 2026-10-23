@@ -402,6 +402,44 @@ def test_results_table_has_fixed_display_order_number_column(client):
     assert ':not([data-column="row_number"])' in html
 
 
+def test_result_actions_are_pinned_in_last_column_as_icon_buttons(client):
+    html = client.get('/').get_data(as_text=True)
+
+    # 操作列固定在末列
+    assert 'data-column="actions" style="width: 112px"' in html
+    assert '<th class="actions-cell" data-column="actions" scope="col">操作</th>' in html
+    assert 'th.actions-cell {' in html
+    assert 'td.actions-cell {' in html
+    assert '.table-container.is-h-scrolled td.actions-cell' in html
+    assert 'function updateActionsColumnShadow()' in html
+    assert "container.classList.toggle('is-h-scrolled'" in html
+    error_pos = html.index('<col data-column="error"')
+    actions_pos = html.index('<col data-column="actions"')
+    assert error_pos < actions_pos
+    # 列顺序收敛：旧存储里缺失或乱序的 actions 也会回到末尾
+    assert "'registration_date', 'expiration_date', 'name_servers', 'error', 'actions'" in html
+    assert "return ['select', 'row_number', ...movable, 'actions'];" in html
+    assert "new Set(['select', 'row_number', 'actions'])" in html
+    # 操作列不参与拖拽、列宽调整与点击复制
+    assert ':not([data-column="actions"])' in html
+    assert "!['row_number', 'actions'].includes(header.dataset.column)" in html
+    assert 'td:not(.checkbox-cell):not(.actions-cell)' in html
+    # 三个操作从域名列移入操作列，且为带 tooltip / aria-label 的图标按钮
+    domain_cell_start = html.index('<td data-column="domain">')
+    domain_cell_end = html.index('</td>', domain_cell_start)
+    domain_cell = html[domain_cell_start:domain_cell_end]
+    assert 'retry-domain-btn' not in domain_cell
+    assert 'detail-result-btn' not in domain_cell
+    assert 'copy-domain-btn' not in domain_cell
+    assert '<span class="row-actions">' in html
+    assert 'const ACTION_ICONS = {' in html
+    assert '${ACTION_ICONS.retry}' in html
+    assert '${ACTION_ICONS.detail}' in html
+    assert '${ACTION_ICONS.copy}' in html
+    assert 'title="查看详细结果" aria-label="查看 ${escapeHtml(r.domain)} 的详细结果"' in html
+    assert "button.innerHTML = ACTION_ICONS.check;" in html
+
+
 def test_pause_stops_log_polling_and_refresh_restores_task(client):
     html = client.get('/').get_data(as_text=True)
 

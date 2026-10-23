@@ -589,6 +589,31 @@
         }
         td.copyable-cell { cursor: copy; overflow: hidden; text-overflow: ellipsis; }
         tr:hover { background: var(--bg-main); }
+        /* 常驻操作列：固定在最右侧，横向滚动时仍可见、可操作 */
+        th.actions-cell {
+            position: sticky;
+            right: 0;
+            z-index: 11;
+            background: var(--primary);
+            cursor: default;
+            text-align: center;
+        }
+        th.actions-cell:hover { background: var(--primary); }
+        td.actions-cell {
+            position: sticky;
+            right: 0;
+            z-index: 5;
+            padding: 6px 8px;
+            text-align: center;
+            white-space: nowrap;
+            background: var(--bg-card);
+            box-shadow: inset 1px 0 0 var(--border-color);
+        }
+        tr:hover td.actions-cell { background: var(--bg-main); }
+        /* 仅当右侧还有被遮住的内容时提示：左侧分隔线 + 内阴影 */
+        .table-container.is-h-scrolled td.actions-cell {
+            box-shadow: inset 1px 0 0 var(--border-color), -8px 0 10px -8px rgba(0, 0, 0, 0.25);
+        }
         
         .checkbox-cell { width: 35px; text-align: center; }
         .row-number-cell {
@@ -632,27 +657,8 @@
         .badge-registered { background: rgba(40,167,69,0.15); color: var(--success); }
         
         .error-text { color: var(--danger); font-size: 11px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .domain-cell-wrap { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
         .domain-cell { font-weight: 600; color: var(--text-primary); cursor: pointer; text-decoration: none; }
         .domain-cell:hover { color: var(--primary); text-decoration: underline; }
-        .retry-domain-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 3px;
-            min-height: 27px;
-            padding: 3px 8px;
-            border: 1px solid var(--primary);
-            border-radius: 5px;
-            background: color-mix(in srgb, var(--primary) 12%, var(--bg-card));
-            color: var(--primary);
-            font-size: 11px;
-            font-weight: 700;
-            cursor: pointer;
-            white-space: nowrap;
-            transition: background 0.2s, color 0.2s, transform 0.2s;
-        }
-        .retry-domain-btn:hover { background: var(--primary); color: #fff; transform: translateY(-1px); }
-        .retry-domain-btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
         .retry-action-btn {
             min-height: 34px;
             padding-inline: 14px;
@@ -661,21 +667,35 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.12);
         }
         .retry-action-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.18); }
+        /* 行内操作：图标按钮组，统一尺寸与对齐 */
+        .row-actions { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+        .retry-domain-btn,
+        .detail-result-btn,
         .copy-domain-btn {
-            width: 26px;
-            height: 26px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
             padding: 0;
             border: 1px solid var(--border-color);
-            border-radius: 5px;
+            border-radius: 6px;
             background: transparent;
             color: var(--text-secondary);
-            cursor: pointer;
-            font-size: 15px;
+            font-size: 13px;
             line-height: 1;
-            transition: color 0.2s, border-color 0.2s, background 0.2s;
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s, background 0.15s;
         }
+        .retry-domain-btn:hover,
+        .detail-result-btn:hover,
         .copy-domain-btn:hover { color: var(--primary); border-color: var(--primary); background: var(--bg-main); }
+        .retry-domain-btn:focus-visible,
+        .detail-result-btn:focus-visible,
+        .copy-domain-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+        .retry-domain-btn:disabled { opacity: 0.45; color: var(--text-secondary); border-color: var(--border-color); background: transparent; cursor: not-allowed; }
         .copy-domain-btn.copied { color: var(--success); border-color: var(--success); }
+        .row-actions svg { width: 15px; height: 15px; pointer-events: none; }
         .whois-status {
             display: block;
             max-width: 190px;
@@ -926,8 +946,6 @@
         .detail-item.full { grid-column: 1 / -1; }
         .detail-label { display: block; margin-bottom: 3px; color: var(--text-secondary); font-size: 11px; }
         .detail-value { color: var(--text-primary); font-size: 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
-        .detail-result-btn { min-height: 27px; padding: 3px 8px; border: 1px solid var(--border-color); border-radius: 5px; background: var(--bg-main); color: var(--text-primary); font-size: 11px; cursor: pointer; white-space: nowrap; }
-        .detail-result-btn:hover { color: var(--primary); border-color: var(--primary); background: var(--bg-card); }
         @media (max-width: 700px) { .detail-grid { grid-template-columns: 1fr; } .detail-item.full { grid-column: auto; } }
 
         @media (max-width: 1100px) {
@@ -1408,6 +1426,7 @@ https://www.example.com/path/to/page"></textarea>
                             <col data-column="expiration_date" style="width: 110px">
                             <col data-column="name_servers" style="width: 220px">
                             <col data-column="error" style="width: 180px">
+                            <col data-column="actions" style="width: 112px">
                         </colgroup>
                         <thead>
                             <tr>
@@ -1429,6 +1448,7 @@ https://www.example.com/path/to/page"></textarea>
                                 <th data-column="expiration_date" data-sort="expiration_date" onclick="sortTable('expiration_date')">过期日期<span class="sort-icon">⇅</span></th>
                                 <th data-column="name_servers" data-sort="name_servers" onclick="sortTable('name_servers')">DNS服务器<span class="sort-icon">⇅</span></th>
                                 <th data-column="error" data-sort="error" onclick="sortTable('error')">备注<span class="sort-icon">⇅</span></th>
+                                <th class="actions-cell" data-column="actions" scope="col">操作</th>
                             </tr>
                         </thead>
                         <tbody id="resultsBody"></tbody>
@@ -1598,7 +1618,7 @@ https://www.example.com/path/to/page"></textarea>
         const defaultResultColumnOrder = [
             'select', 'row_number', 'domain', 'query_time', 'query_duration_seconds', 'query_source',
             'query_state', 'status', 'resolved', 'whois_status', 'registrar', 'contact_email',
-            'registration_date', 'expiration_date', 'name_servers', 'error'
+            'registration_date', 'expiration_date', 'name_servers', 'error', 'actions'
         ];
         // 老用户已保存列顺序时的插入锚点：新列跟随在查询耗时之后，而不是追加到末尾
         const defaultColumnAnchors = { query_source: 'query_duration_seconds' };
@@ -2449,6 +2469,14 @@ https://www.example.com/path/to/page"></textarea>
             renderResults();
         }
         
+        // 行内操作图标（Lucide 风格线性图标，随按钮文字颜色继承）
+        const ACTION_ICONS = {
+            retry: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 2v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L3 8"/></svg>',
+            detail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
+            copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="12" height="12" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>',
+            check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
+        };
+
         // 渲染结果表格
         function renderResults() {
             const tbody = document.getElementById('resultsBody');
@@ -2508,7 +2536,7 @@ https://www.example.com/path/to/page"></textarea>
                 tr.innerHTML = `
                     <td class="checkbox-cell" data-column="select"><input type="checkbox" ${checked} ${pendingDisabled} onchange="toggleSelect('${escapeHtml(r.domain)}')"></td>
                     <td class="row-number-cell" data-column="row_number">${index + 1}</td>
-                    <td data-column="domain"><span class="domain-cell-wrap"><a class="domain-cell" href="https://${escapeHtml(r.domain)}" target="_blank" rel="noopener noreferrer" title="打开网站">${escapeHtml(r.domain)}</a><button type="button" class="retry-domain-btn" ${pendingDisabled} onclick="retrySingle('${escapeHtml(r.domain)}')" title="重新查询此域名" aria-label="重新查询此域名">↻ 重查</button><button type="button" class="detail-result-btn" onclick="showResultDetails('${escapeHtml(r.domain)}')" title="查看详细结果" aria-label="查看 ${escapeHtml(r.domain)} 的详细结果">详细结果</button><button type="button" class="copy-domain-btn" onclick="copyDomain(this, '${escapeHtml(r.domain)}')" title="复制域名" aria-label="复制域名 ${escapeHtml(r.domain)}">⧉</button></span></td>
+                    <td data-column="domain"><a class="domain-cell" href="https://${escapeHtml(r.domain)}" target="_blank" rel="noopener noreferrer" title="打开网站 ${escapeHtml(r.domain)}">${escapeHtml(r.domain)}</a></td>
                     <td class="query-time-cell" data-column="query_time">${escapeHtml(r.query_time || '')}</td>
                     <td class="query-time-cell" data-column="query_duration_seconds">${formatResultDuration(r.query_duration_seconds)}</td>
                     <td data-column="query_source">${sourceBadge}</td>
@@ -2522,6 +2550,13 @@ https://www.example.com/path/to/page"></textarea>
                     <td data-column="expiration_date">${r.expiration_date || '-'}</td>
                     <td data-column="name_servers"><small title="${escapeHtml(r.name_servers || '')}">${escapeHtml(r.name_servers ? (r.name_servers.length > 30 ? r.name_servers.slice(0,30) + '...' : r.name_servers) : '-')}</small></td>
                     <td data-column="error"><small class="error-text" title="${escapeHtml(r.error || '')}">${escapeHtml(r.error || '')}</small></td>
+                    <td class="actions-cell" data-column="actions">
+                        <span class="row-actions">
+                            <button type="button" class="retry-domain-btn" ${pendingDisabled} onclick="retrySingle('${escapeHtml(r.domain)}')" title="${pending ? '查询中，暂不可重查' : '重新查询此域名'}" aria-label="重新查询 ${escapeHtml(r.domain)}">${ACTION_ICONS.retry}</button>
+                            <button type="button" class="detail-result-btn" onclick="showResultDetails('${escapeHtml(r.domain)}')" title="查看详细结果" aria-label="查看 ${escapeHtml(r.domain)} 的详细结果">${ACTION_ICONS.detail}</button>
+                            <button type="button" class="copy-domain-btn" onclick="copyDomain(this, '${escapeHtml(r.domain)}')" title="复制域名" aria-label="复制域名 ${escapeHtml(r.domain)}">${ACTION_ICONS.copy}</button>
+                        </span>
+                    </td>
                 `;
 
                 const copyValues = [
@@ -2532,7 +2567,7 @@ https://www.example.com/path/to/page"></textarea>
                     r.whois_status, r.registrar, r.contact_email,
                     r.registration_date, r.expiration_date, r.name_servers, r.error,
                 ];
-                tr.querySelectorAll('td:not(.checkbox-cell)').forEach((cell, index) => {
+                tr.querySelectorAll('td:not(.checkbox-cell):not(.actions-cell)').forEach((cell, index) => {
                     const value = detailValue(copyValues[index]);
                     cell.classList.add('copyable-cell');
                     cell.title = cell.title || '点击复制单元格内容';
@@ -2543,6 +2578,7 @@ https://www.example.com/path/to/page"></textarea>
             });
 
             applyColumnOrder(loadColumnOrder());
+            updateActionsColumnShadow();
             
             const statsResults = currentResultDisplayMode === 'progressive'
                 ? currentResults.filter(result => result.status !== null && result.status !== undefined)
@@ -2602,11 +2638,11 @@ https://www.example.com/path/to/page"></textarea>
                 return;
             }
 
-            button.textContent = '✓';
+            button.innerHTML = ACTION_ICONS.check;
             button.classList.add('copied');
             showToast(`已复制域名: ${domain}`);
             setTimeout(() => {
-                button.textContent = '⧉';
+                button.innerHTML = ACTION_ICONS.copy;
                 button.classList.remove('copied');
             }, 1200);
         }
@@ -3250,7 +3286,8 @@ https://www.example.com/path/to/page"></textarea>
                 localStorage.removeItem('domainCheckerColumnOrder');
             }
             const known = new Set(defaultResultColumnOrder);
-            const fixed = new Set(['select', 'row_number']);
+            // 序号列固定在开头、操作列固定在末尾，两者都不参与拖拽换序
+            const fixed = new Set(['select', 'row_number', 'actions']);
             const movable = saved.filter((key, index) =>
                 !fixed.has(key) && known.has(key) && saved.indexOf(key) === index
             );
@@ -3260,7 +3297,7 @@ https://www.example.com/path/to/page"></textarea>
                 if (anchorIndex >= 0) movable.splice(anchorIndex + 1, 0, key);
                 else movable.push(key);
             });
-            return ['select', 'row_number', ...movable];
+            return ['select', 'row_number', ...movable, 'actions'];
         }
 
         function applyColumnOrder(order) {
@@ -3279,9 +3316,28 @@ https://www.example.com/path/to/page"></textarea>
             });
         }
 
+        // 横向滚动时给固定操作列补分隔阴影，仅当右侧仍有被遮住的内容
+        function updateActionsColumnShadow() {
+            const container = document.querySelector('#resultsCard .table-container');
+            if (!container) return;
+            const hiddenRight = container.scrollWidth - container.clientWidth - container.scrollLeft;
+            container.classList.toggle('is-h-scrolled', hiddenRight > 1);
+        }
+
+        function initActionsColumnShadow() {
+            const container = document.querySelector('#resultsCard .table-container');
+            if (!container) return;
+            container.addEventListener('scroll', updateActionsColumnShadow, { passive: true });
+            window.addEventListener('resize', updateActionsColumnShadow);
+            if (typeof ResizeObserver !== 'undefined') {
+                new ResizeObserver(updateActionsColumnShadow).observe(container);
+            }
+            updateActionsColumnShadow();
+        }
+
         function initDraggableColumns() {
             const table = document.getElementById('resultsTable');
-            table.querySelectorAll('thead th[data-column]:not([data-column="select"]):not([data-column="row_number"])').forEach(header => {
+            table.querySelectorAll('thead th[data-column]:not([data-column="select"]):not([data-column="row_number"]):not([data-column="actions"])').forEach(header => {
                 header.draggable = true;
                 header.title = '点击排序；拖动调整列顺序';
                 header.addEventListener('dragstart', event => {
@@ -3334,7 +3390,7 @@ https://www.example.com/path/to/page"></textarea>
         function initResizableColumns() {
             const table = document.getElementById('resultsTable');
             const headers = Array.from(table.querySelectorAll('thead th'))
-                .filter(header => header.dataset.column !== 'row_number');
+                .filter(header => !['row_number', 'actions'].includes(header.dataset.column));
             let saved = {};
             try {
                 const value = JSON.parse(localStorage.getItem('domainCheckerColumnWidths') || '{}');
@@ -3342,7 +3398,7 @@ https://www.example.com/path/to/page"></textarea>
             } catch (error) {
                 localStorage.removeItem('domainCheckerColumnWidths');
             }
-            table.querySelectorAll('col[data-column]').forEach(column => {
+            table.querySelectorAll('col[data-column]:not([data-column="actions"])').forEach(column => {
                 const width = saved[column.dataset.column];
                 if (Number.isFinite(width) && width >= 48) column.style.width = `${width}px`;
             });
@@ -3372,7 +3428,7 @@ https://www.example.com/path/to/page"></textarea>
                         window.removeEventListener('pointermove', move);
                         window.removeEventListener('pointerup', up);
                         const widths = {};
-                        table.querySelectorAll('col[data-column]').forEach(item => {
+                        table.querySelectorAll('col[data-column]:not([data-column="actions"])').forEach(item => {
                             widths[item.dataset.column] = Math.round(item.getBoundingClientRect().width);
                         });
                         localStorage.setItem('domainCheckerColumnWidths', JSON.stringify(widths));
@@ -3414,6 +3470,7 @@ https://www.example.com/path/to/page"></textarea>
         applyColumnOrder(loadColumnOrder());
         initDraggableColumns();
         initResizableColumns();
+        initActionsColumnShadow();
     </script>
 </body>
 </html>
