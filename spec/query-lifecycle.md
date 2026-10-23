@@ -24,7 +24,8 @@
 - 同一任务不能同时运行查询和重查，重叠请求返回 `409`。
 - 每个 worker 无论成功或意外异常都必须推进 `operation_completed`。意外异常写成 `failed` 结果，不能让任务永久停在 `processing`。
 - 完成状态写入后，前端再读取最终结果，避免最后一条结果竞态丢失。
-- 每条结果保存 `query_time` 和 `query_duration_seconds`；任务保存整体耗时。
+- 每条结果保存 `query_time` 和 `query_duration_seconds`；任务保存整体耗时。复用结果为 `reused=true`，
+  这两个字段保留原始查询值，不伪造为本次任务开始时间。
 - 初次查询创建全部域名占位行，`query_state` 通常按 `queued -> querying -> completed` 更新；暂停时仅未完成行
   临时进入 `paused`，恢复后回到原来的 `queued/querying`，终止时仅未完成行进入 `cancelled`。已经完成的行不变；
   最终 `status` 继续表示成功、未注册、超时、失败或无效，不与执行阶段混用。
@@ -35,7 +36,15 @@
 
 ## 并发和持久化
 
-- 并发由 `ThreadPoolExecutor(max_workers)` 控制；默认不限流模式不添加主动等待，标准/快速模式只调整限流和重试等待。简略快速模式最多一次 WHOIS 尝试和一次 DNS 查询，并跳过 HTTP 探测与 DNS 自动复查；它只减少网络步骤，不放宽确定性判断语义。`query_timeout` 可按任务覆盖全局超时。
+- 并发由 `ThreadPoolExecutor(max_workers)` 控制，配置入口为 1-32 的每任务线程池上限；任务启动时读取
+  一次，运行中修改只影响后续任务。多个任务并行会各自占用线程，全局并发约为任务数 × `max_workers`。
+- 默认不限流模式不添加主动等待，标准/快速模式只调整限流和重试等待；`rate_limit_delay` 同时作用于
+  RDAP（默认平台）与 WHOIS。简略快速模式最多一次 WHOIS 尝试和一次 DNS 查询，并跳过 HTTP 探测与
+  DNS 自动复查；它只减少网络步骤，不放宽确定性判断语义。`query_timeout` 可按任务覆盖全局超时。
+- 新任务按 `reuse_recent_seconds`（0 关闭）复用窗口内 `status=success` 且 DNS 有结论的最新结果，
+  命中项标记 `reused=true` 并跳过网络查询；新鲜度按原始 `query_time` 计算。重查始终强制联网。
+- 数值配置在 API 与 `settings.json` 加载时统一归一化：超范围收敛到边界，非法值忽略或返回 `400`，
+  不能让任务线程因配置异常退出。
 - 访问 `task_storage` 持 `task_lock`，访问 `CONFIG` 持 `config_lock`，锁内不执行数据库 IO。
 - 完成后在锁外保存结果和历史计数。测试必须使用临时数据目录且 mock 所有 WHOIS、DNS、HTTP 网络调用。
 

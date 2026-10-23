@@ -128,7 +128,8 @@ DNS 单次查询与 HTTP 可达性探测另有独立短超时上限（5 秒/3 �
 SQLite（`query_history` + `query_results`），表结构见 `db.init_db()` 的 DDL。要点：
 
 - `query_history.task_id` 唯一；一次任务一行，含域名清单快照与配置快照（剔除敏感项）
-- `query_results` 按 `task_id` 关联；`save_results` 对同一任务整体覆盖写入
+- `query_results` 按 `task_id` 关联；`save_results` 对同一任务整体覆盖写入；
+  `idx_query_results_domain_created` 支撑最近成功结果的复用查询
 - `query_state` 是内存中的实时执行阶段，不写入 SQLite；历史结果均视为 `completed`
 - 历史批量删除在同一 SQLite 事务中先删明细再删主记录；清理全部和删除运行中任务互斥
 - `resolved` 存 `1/0/NULL` 对应 `True/False/None`（API 返回时注意转换）
@@ -148,10 +149,18 @@ SQLite（`query_history` + `query_results`），表结构见 `db.init_db()` 的 
 - 共享状态保护：`config_lock`（CONFIG 读写）、`task_lock`（task_storage 读写）
 - 写日志/改先决步骤时注意：在 `task_lock` 内不做数据库 IO（完成落库在锁外执行）
 - `task_pause_flags` 为普通 dict，布尔读写本身原子性足够
-- `max_workers` 是每个任务的线程池上限；去掉了逐域名创建线程的固定启动间隔，查询内仍按
-  `rate_limit_delay` 执行限流
+- `max_workers` 是每个任务的线程池上限（配置入口 1-32，服务端与 `settings.json` 加载时统一收紧）。
+  任务在启动时读取一次配置，运行中修改只影响后续任务；多个任务并行会各自占用线程，因此
+  全局并发约为「运行中任务数 × max_workers」。实际吞吐仍受目标 RDAP/WHOIS 服务限流、网络时延
+  和超时约束，盲目调高线程数只会增加超时与限流概率。
+- 限流 `rate_limit_delay` 同时作用于 RDAP（默认平台）与 WHOIS；查询模式只能收紧配置值，
+  `unlimited` 固定为 0。RDAP 回退 WHOIS 时会在两个协议阶段各自等待。
+- 最近成功结果复用：新任务按 `reuse_recent_seconds`（默认 600 秒，0 关闭）查询 SQLite 中
+  `status=success` 且 `resolved` 有结论的最新记录。命中项跳过 RDAP/WHOIS/DNS/HTTP 并把
+  `reused=true` 写回结果；新鲜度按原始 `query_time` 计算，复用结果再次落库不会延长 TTL。
+  重查（`retry`/`retry-failed`）始终强制联网，不读取复用缓存。
 - 查询任务支持 `unlimited`/`standard`/`quick`/`brief` 四种模式，默认 `unlimited` 不添加主动等待。
-  前三种只调整 WHOIS 请求与失败重试等待；`brief` 最多执行一次 WHOIS 尝试、一次 DNS 查询，跳过 HTTP
+  前三种只调整注册查询与失败重试等待；`brief` 最多执行一次 WHOIS 尝试、一次 DNS 查询，跳过 HTTP
   探测与 DNS 自动复查，因此瞬时故障更容易显示未知或失败，但不会放宽未注册判定。任务可通过
   `query_timeout` 覆盖全局单次网络请求超时。
 - 任务用单调时钟累计 `paused_duration_seconds`；状态接口、任务完成耗时和单域名耗时均扣除暂停区间，

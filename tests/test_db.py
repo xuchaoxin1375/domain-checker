@@ -1,5 +1,7 @@
 """SQLite 持久化单元测试（在 conftest 设置的临时数据目录下运行）。"""
 
+from datetime import datetime, timedelta
+
 from domain_checker import db
 from domain_checker.settings import DB_PATH
 
@@ -95,3 +97,77 @@ def test_batch_delete_and_clear_all_use_single_database(tmp_path, monkeypatch):
     assert db.get_history_detail('DBB01')[0] is None
     assert db.clear_all_history() == 1
     assert db.get_history() == []
+
+
+class TestRecentSuccessReuse:
+    """最近成功结果复用：只取 TTL 内成功且 DNS 有结论的最新记录。"""
+
+    def _save(self, task_id, results):
+        db.save_history(task_id, [r['domain'] for r in results], 'processing')
+        db.save_results(task_id, results)
+        db.update_history_counts(task_id, len(results), 0)
+
+    @staticmethod
+    def _result(domain, *, status='success', resolved=True, query_time=None, registrar='R'):
+        return {
+            'domain': domain, 'status': status, 'registrar': registrar,
+            'whois_status': 'ok', 'hold_status': '', 'resolved': resolved,
+            'block_reason': '' if resolved is not False else '未解析',
+            'dns_records': ['1.2.3.4'] if resolved else [],
+            'error': '', 'raw_response': 'raw',
+            'query_time': query_time or datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'query_duration_seconds': 1.5,
+        }
+
+    def test_returns_fresh_success_with_converted_fields(self):
+        self._save('REUSE01', [self._result('fresh.com')])
+
+        found = db.find_recent_success_results(['fresh.com', 'missing.com'], 600)
+
+        assert set(found) == {'fresh.com'}
+        result = found['fresh.com']
+        assert result['resolved'] is True
+        assert result['dns_records'] == ['1.2.3.4']
+        assert result['registrar'] == 'R'
+        assert 'id' not in result and 'created_at' not in result
+
+    def test_skips_failed_unregistered_and_unknown_dns(self):
+        self._save('REUSE02', [
+            self._result('failed.com', status='failed', resolved=None),
+            self._result('available.com', status='not_registered', resolved=None),
+            self._result('unknown.com', status='success', resolved=None),
+        ])
+
+        found = db.find_recent_success_results(
+            ['failed.com', 'available.com', 'unknown.com'], 600,
+        )
+
+        assert found == {}
+
+    def test_respects_ttl_and_ignores_zero_window(self):
+        old_time = (datetime.now() - timedelta(hours=2)).strftime('%Y-%m-%d %H:%M:%S')
+        self._save('REUSE03', [self._result('old.com', query_time=old_time)])
+
+        assert db.find_recent_success_results(['old.com'], 600) == {}
+        assert db.find_recent_success_results(['old.com'], 3 * 3600)
+        assert db.find_recent_success_results(['old.com'], 0) == {}
+
+    def test_newest_record_wins(self):
+        older = (datetime.now() - timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S')
+        newer = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        self._save('REUSE04', [self._result('multi.com', query_time=older, registrar='Old')])
+        self._save('REUSE05', [self._result('multi.com', query_time=newer, registrar='New')])
+
+        found = db.find_recent_success_results(['multi.com'], 600)
+
+        assert found['multi.com']['registrar'] == 'New'
+
+    def test_reused_copy_does_not_extend_freshness(self):
+        # 复用结果再次落库时 created_at 是新的，但 query_time 仍是原始时间；
+        # TTL 必须按 query_time 判断，否则连续查询会让旧数据永久"保鲜"。
+        old_time = (datetime.now() - timedelta(hours=2)).strftime('%Y-%m-%d %H:%M:%S')
+        self._save('REUSE06', [self._result('chain.com', query_time=old_time)])
+
+        found = db.find_recent_success_results(['chain.com'], 600)
+
+        assert found == {}

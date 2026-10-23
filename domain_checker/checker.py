@@ -745,6 +745,28 @@ def query_whois_with_retry(domain: str, query_mode: str = 'unlimited', timeout: 
     return timeout_result(domain, last_error) if last_status == 'timeout' else failed_result(domain, last_error)
 
 
+def _registration_rate_wait(query_mode: str) -> float:
+    """计算注册查询前的主动等待秒数；RDAP 与 WHOIS 共用同一配置语义。
+
+    查询模式只能收紧配置值，不能放大；``unlimited`` 固定为 0。RDAP 是默认
+    平台，若不在这里应用限流，网页上的「限流」设置对默认查询路径完全无效。
+    """
+    query_mode = normalize_query_mode(query_mode)
+    with config_lock:
+        delay = max(0.0, float(CONFIG.get('rate_limit_delay', 0.0)))
+    mode_delay = QUERY_MODES[query_mode]['rate_limit_delay']
+    if mode_delay is not None:
+        delay = min(delay, float(mode_delay))
+
+    if query_mode == 'unlimited':
+        jitter = 0.0
+    elif query_mode == 'quick':
+        jitter = random.uniform(0.02, 0.08)
+    else:
+        jitter = random.uniform(0.1, 0.3)
+    return delay + jitter
+
+
 def query_rdap_with_whois_fallback(domain: str, query_mode: str = 'unlimited',
                                    timeout: int | None = None) -> dict:
     """优先查询 RDAP；不支持或非确定性失败时使用 WHOIS 兼容回退。"""
@@ -757,6 +779,15 @@ def query_rdap_with_whois_fallback(domain: str, query_mode: str = 'unlimited',
         append_task_log(task_id, 'info', f'[{domain}] 开始 RDAP 权威查询')
     if not _wait_for_current_task():
         return failed_result(domain, TASK_CANCELLED_MESSAGE)
+
+    rate_wait = _registration_rate_wait(query_mode)
+    if rate_wait > 0:
+        if task_id:
+            append_task_log(task_id, 'info', f'[{domain}] RDAP 限流等待 {rate_wait:.1f} 秒')
+        time.sleep(rate_wait)
+        if not _wait_for_current_task():
+            return failed_result(domain, TASK_CANCELLED_MESSAGE)
+
     rdap_result = query_rdap(domain, request_timeout)
     if rdap_result and rdap_result['status'] in {'success', 'not_registered'}:
         logger.info(f'[{domain}] RDAP 查询成功')
@@ -786,13 +817,17 @@ def query_registration_with_retry(domain: str, platform: str = 'rdap',
 
 def process_single_domain(domain: str, task_id: 'str | None' = None,
                           query_mode: str = 'unlimited', query_timeout: int | None = None,
-                          platform: str | None = None) -> dict:
+                          platform: str | None = None,
+                          cached_result: dict | None = None) -> dict:
     """处理单个域名：格式校验 → 注册数据查询 → DNS 解析检查。
 
     传入 task_id 时会将结果实时写入对应内存任务（供 Web 端轮询展示）。
+    ``cached_result`` 为复用窗口内最近一次成功结果：命中时跳过所有注册与 DNS
+    网络查询，保留原查询时间与耗时，并标记 ``reused=True``。
     """
     domain = domain.strip().lower()
     started = time.perf_counter()
+    reused = False
     runtime_task_id = getattr(threading.current_thread(), 'task_id', None) or task_id
     paused_duration_at_start = get_task_paused_duration(runtime_task_id)
     query_time = datetime.now().replace(microsecond=0).isoformat(sep=' ')
@@ -810,7 +845,8 @@ def process_single_domain(domain: str, task_id: 'str | None' = None,
             'contact_email': None,
             'whois_status': None, 'hold_status': None,
             'error': '域名格式无效', 'raw_response': None,
-            'resolved': None, 'block_reason': None, 'dns_records': None
+            'resolved': None, 'block_reason': None, 'dns_records': None,
+            'reused': False,
         }
     else:
         if platform is None:
@@ -818,6 +854,18 @@ def process_single_domain(domain: str, task_id: 'str | None' = None,
                 platform = CONFIG.get('platform', 'rdap')
         if not _wait_for_current_task():
             result = {**failed_result(domain, TASK_CANCELLED_MESSAGE), **resolve_result}
+        elif cached_result is not None:
+            # 缓存命中：不再发起 RDAP/WHOIS/DNS/HTTP 请求
+            reused = True
+            result = dict(cached_result)
+            result['domain'] = domain
+            result['reused'] = True
+            resolve_result = {
+                'resolved': result.get('resolved'),
+                'block_reason': result.get('block_reason'),
+                'dns_records': result.get('dns_records') or [],
+            }
+            logger.info(f"[{domain}] 复用最近成功结果，跳过网络查询")
         else:
             normalized_mode = normalize_query_mode(query_mode)
             whois_result = query_registration_with_retry(
@@ -861,14 +909,21 @@ def process_single_domain(domain: str, task_id: 'str | None' = None,
 
     if not _wait_for_current_task():
         result = {**failed_result(domain, TASK_CANCELLED_MESSAGE), **resolve_result}
+        reused = False
 
-    paused_duration = max(
-        0.0,
-        get_task_paused_duration(runtime_task_id) - paused_duration_at_start,
-    )
-    duration = max(0.0, time.perf_counter() - started - paused_duration)
-    result['query_time'] = query_time
-    result['query_duration_seconds'] = round(duration, 2)
+    if reused:
+        # 保留原始查询时间与耗时，前端据此判断结果新鲜度
+        result['query_time'] = cached_result.get('query_time') or query_time
+        result['query_duration_seconds'] = cached_result.get('query_duration_seconds')
+    else:
+        paused_duration = max(
+            0.0,
+            get_task_paused_duration(runtime_task_id) - paused_duration_at_start,
+        )
+        duration = max(0.0, time.perf_counter() - started - paused_duration)
+        result['query_time'] = query_time
+        result['query_duration_seconds'] = round(duration, 2)
+    result.setdefault('reused', reused)
     result['query_state'] = 'completed'
 
     # 更新任务
@@ -901,7 +956,11 @@ def process_single_domain(domain: str, task_id: 'str | None' = None,
                 elif resolve_result['resolved'] is False:
                     log_level = 'warn'
 
-                detail = f"{'完成' if result['status'] == 'success' else '结束'}，耗时 {duration:.2f} 秒"
+                detail = (
+                    f"复用最近成功结果（原查询 {result['query_time'] or '时间未知'}），跳过网络查询"
+                    if reused
+                    else f"{'完成' if result['status'] == 'success' else '结束'}，耗时 {duration:.2f} 秒"
+                )
                 if result.get('registrar'):
                     detail += f"，注册商 {result['registrar']}"
                 if resolve_result['resolved'] is True:

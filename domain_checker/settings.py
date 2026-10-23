@@ -42,7 +42,8 @@ CONFIG = {
     'max_retries': 3,                 # 最大重试次数
     'retry_delay': 2,                 # 重试间隔(秒)
     'timeout': 15,                    # WHOIS/RDAP/DNS/HTTP 每次网络请求超时(秒)
-    'max_workers': 5,                 # 并发线程数
+    'max_workers': 5,                 # 每个任务的并发线程数（1-32）
+    'reuse_recent_seconds': 600,      # 最近成功结果的复用窗口(秒)，0 表示关闭
     'proxy_enabled': False,           # 是否启用代理
     'proxy_url': 'http://127.0.0.1:7897',  # 代理地址
     'proxy_auth': None,
@@ -52,6 +53,49 @@ CONFIG = {
 
 TIMEOUT_MIN_SECONDS = 1
 TIMEOUT_MAX_SECONDS = 120
+
+# 配置项取值范围：网页、API 与 settings.json 共用同一套归一化规则，避免非法值
+# 在任务线程里抛异常，或让单个任务创建尺寸失控的线程池。
+# 并发上限刻意收敛：实际吞吐仍受目标 WHOIS/RDAP 服务限流、网络时延与超时约束，
+# 线程数远超对端许可时只会增加超时和限流概率。
+CONFIG_LIMITS = {
+    'max_domains_per_batch': (1, 2000),
+    'rate_limit_delay': (0.0, 60.0),
+    'max_retries': (1, 10),
+    'retry_delay': (0.0, 300.0),
+    'timeout': (TIMEOUT_MIN_SECONDS, TIMEOUT_MAX_SECONDS),
+    'max_workers': (1, 32),
+    'reuse_recent_seconds': (0, 86400),
+}
+
+
+def coerce_config_value(key: str, value):
+    """按配置项类型与范围归一化外部输入。
+
+    无法转换时抛出 ``ValueError``（消息可直接返回给前端）；数值超出范围时
+    收敛到边界，与网页输入框的 min/max 保持一致。
+    """
+    if key in ('proxy_enabled', 'allow_lan_access'):
+        return bool(value)
+    if key == 'platform':
+        return value if value in PLATFORMS else 'rdap'
+    if key in ('proxy_url', 'proxy_auth'):
+        return value
+
+    limits = CONFIG_LIMITS.get(key)
+    if limits is None:
+        return value
+
+    low, high = limits
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f'{key} 必须是数字') from None
+    if number != number or number in (float('inf'), float('-inf')):
+        raise ValueError(f'{key} 必须是有效数字')
+    if isinstance(low, int):
+        return max(low, min(high, int(number)))
+    return max(low, min(high, float(number)))
 
 
 def normalize_timeout(value) -> int:
@@ -119,7 +163,10 @@ def load_config_from_file():
             with config_lock:
                 for k, v in saved.items():
                     if k in CONFIG and k not in PRIVATE_CONFIG_KEYS:
-                        CONFIG[k] = normalize_timeout(v) if k == 'timeout' else v
+                        try:
+                            CONFIG[k] = coerce_config_value(k, v)
+                        except ValueError as exc:
+                            logger.warning(f'忽略无效配置 {k}={v!r}: {exc}')
             logger.info(f"已加载配置文件: {SETTINGS_PATH}")
     except Exception as e:
         logger.warning(f"加载配置文件失败: {e}")

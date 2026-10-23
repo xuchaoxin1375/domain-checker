@@ -560,6 +560,58 @@ def test_timeout_is_applied_per_whois_attempt_and_rdap_fallback(monkeypatch):
     rdap_fallback.assert_called_once_with('example.com', 3)
 
 
+def test_cached_result_skips_all_network_calls(monkeypatch):
+    cached = {
+        'domain': 'cached.example', 'status': 'success', 'registrar': 'Cached Registrar',
+        'registration_date': '2020-01-01', 'expiration_date': '2030-01-01',
+        'updated_date': None, 'name_servers': 'ns1.example', 'dnssec': 'unsigned',
+        'contact_email': 'abuse@example.com', 'whois_status': 'ok', 'hold_status': None,
+        'resolved': True, 'block_reason': None, 'dns_records': ['1.2.3.4'],
+        'error': None, 'raw_response': 'raw', 'query_time': '2026-08-01 09:55:00',
+        'query_duration_seconds': 2.5,
+    }
+    query = mock.Mock(side_effect=AssertionError('复用结果不得发起注册查询'))
+    dns_check = mock.Mock(side_effect=AssertionError('复用结果不得发起 DNS 查询'))
+    monkeypatch.setattr('domain_checker.checker.query_registration_with_retry', query)
+    monkeypatch.setattr('domain_checker.checker.check_domain_resolved', dns_check)
+
+    result = process_single_domain('cached.example', cached_result=cached)
+
+    query.assert_not_called()
+    dns_check.assert_not_called()
+    assert result['reused'] is True
+    assert result['status'] == 'success'
+    assert result['registrar'] == 'Cached Registrar'
+    assert result['resolved'] is True
+    assert result['query_state'] == 'completed'
+    # 复用结果保留原始查询时间，避免前端误以为刚刚联网查询过
+    assert result['query_time'] == '2026-08-01 09:55:00'
+    assert result['query_duration_seconds'] == 2.5
+
+
+def test_rdap_rate_wait_is_effective_and_mode_bounded(monkeypatch):
+    from domain_checker import checker
+
+    success = {'domain': 'example.com', 'status': 'success'}
+    monkeypatch.setitem(checker.CONFIG, 'rate_limit_delay', 1.0)
+    monkeypatch.setattr(checker, 'query_rdap', mock.Mock(return_value=success))
+    # 固定抖动，便于精确断言主动等待时间
+    monkeypatch.setattr(checker.random, 'uniform', lambda low, high: 0.0)
+    sleep = mock.Mock()
+    monkeypatch.setattr(checker.time, 'sleep', sleep)
+
+    checker.query_rdap_with_whois_fallback('example.com', query_mode='standard', timeout=3)
+    assert sleep.call_args.args[0] == 1.0
+
+    sleep.reset_mock()
+    checker.query_rdap_with_whois_fallback('example.com', query_mode='quick', timeout=3)
+    assert sleep.call_args.args[0] == 0.1
+
+    sleep.reset_mock()
+    checker.query_rdap_with_whois_fallback('example.com', query_mode='unlimited', timeout=3)
+    sleep.assert_not_called()
+
+
 def test_whois_success_preserves_raw_response(monkeypatch):
     from domain_checker.checker import query_whois_with_retry
 

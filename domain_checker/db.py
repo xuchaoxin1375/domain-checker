@@ -8,7 +8,7 @@
 import json
 import logging
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from . import settings
 
@@ -84,6 +84,12 @@ def init_db():
     }.items():
         if column not in existing_columns:
             cursor.execute(f'ALTER TABLE query_results ADD COLUMN {column} {definition}')
+
+    # 最近成功结果复用按域名 + 时间查询，索引避免每次批量查询都全表扫描
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_query_results_domain_created
+        ON query_results(domain, created_at)
+    ''')
 
     conn.commit()
     conn.close()
@@ -215,6 +221,69 @@ def get_history_detail(task_id: str):
 
     conn.close()
     return history, results
+
+
+def _result_row_to_dict(row: sqlite3.Row) -> dict:
+    """把 query_results 行转换为与内存结果一致的字段结构。"""
+    result = dict(row)
+    resolved = result.get('resolved')
+    result['resolved'] = (
+        True if resolved == 1 else False if resolved == 0 else None
+    )
+    records = result.get('dns_records')
+    result['dns_records'] = records.split(',') if records else []
+    for db_only in ('id', 'task_id', 'created_at'):
+        result.pop(db_only, None)
+    return result
+
+
+def find_recent_success_results(domains: list[str], max_age_seconds: int) -> dict[str, dict]:
+    """查找 TTL 内最近一次成功且 DNS 有明确结论的结果，用于跳过网络查询。
+
+    新鲜度按结果自身的 ``query_time`` 计算：复用结果再次落库时不会延长 TTL，
+    避免连续小批次查询把旧数据无限期续命。只复用 ``status='success'`` 且
+    ``resolved`` 为 1/0 的行；未注册、失败以及 DNS 未知的结果仍走实时查询。
+    """
+    unique_domains = list(dict.fromkeys(str(domain) for domain in domains if domain))
+    if not unique_domains:
+        return {}
+
+    try:
+        max_age = int(max_age_seconds)
+    except (TypeError, ValueError):
+        return {}
+    if max_age <= 0:
+        return {}
+
+    cutoff = (datetime.now() - timedelta(seconds=max_age)).strftime('%Y-%m-%dT%H:%M:%S')
+    found: dict[str, dict] = {}
+    conn = _connect()
+    try:
+        # SQLite 旧版本单个语句最多 999 个参数，按 500 分块以兼容
+        for start in range(0, len(unique_domains), 500):
+            chunk = unique_domains[start:start + 500]
+            placeholders = ','.join('?' for _ in chunk)
+            cursor = conn.execute(f'''
+                SELECT * FROM query_results
+                WHERE domain IN ({placeholders})
+                  AND status = 'success'
+                  AND resolved IS NOT NULL
+                  AND COALESCE(
+                        NULLIF(substr(replace(query_time, ' ', 'T'), 1, 19), ''),
+                        substr(created_at, 1, 19)
+                      ) >= ?
+                ORDER BY COALESCE(
+                        NULLIF(replace(query_time, ' ', 'T'), ''),
+                        created_at
+                      ) DESC
+            ''', (*chunk, cutoff))
+            for row in cursor.fetchall():
+                # 已按时间倒序，每个域名只保留最新一条
+                if row['domain'] not in found:
+                    found[row['domain']] = _result_row_to_dict(row)
+    finally:
+        conn.close()
+    return found
 
 
 def delete_history(task_id: str):

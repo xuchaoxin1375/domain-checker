@@ -319,3 +319,39 @@ def test_brief_query_mode_and_empty_duration_placeholder(client):
     assert '单轮注册状态查询（RDAP 必要时回退一次 WHOIS）和一次 DNS 检查，不做 HTTP 探测或自动复查' in html
     assert '<div class="query-elapsed" id="queryElapsed"></div>' in html
     assert "if (seconds === null || seconds === undefined || seconds === '') return '';" in html
+
+
+def test_concurrency_and_reuse_settings_are_wired(client):
+    html = client.get('/').get_data(as_text=True)
+
+    # 并发入口真实可用且有明确上限与生效时机说明
+    assert 'id="cfgWorkers"' in html
+    assert 'max="32"' in html
+    assert '每个任务的并发线程上限' in html
+    assert '任务开始后修改配置只影响后续任务' in html
+    # 结果复用入口与提示
+    assert 'id="cfgReuse"' in html
+    assert '结果复用(秒)' in html
+    assert 'reuse_recent_seconds: parseInt' in html
+    assert "document.getElementById('cfgReuse').value = config.reuse_recent_seconds" in html
+    assert '重查」始终强制联网' in html
+    # 命中复用的结果在状态列可见，详细结果说明来源
+    assert "✓ 查询成功${r.reused ? " in html
+    assert '查询成功（复用最近结果）' in html
+    assert "['结果来源', result.reused ?" in html
+
+
+def test_results_table_has_fixed_display_order_number_column(client):
+    html = client.get('/').get_data(as_text=True)
+
+    select_pos = html.index('<col data-column="select"')
+    number_pos = html.index('<col data-column="row_number"')
+    domain_pos = html.index('<col data-column="domain"')
+    assert select_pos < number_pos < domain_pos
+    assert 'data-column="row_number" style="width: 56px"' in html
+    assert 'data-column="row_number" title="按当前展示顺序编号">序号' in html
+    assert '<td class="row-number-cell" data-column="row_number">${index + 1}</td>' in html
+    assert 'index + 1,\n                    r.domain' in html
+    # 序号跟随当前展示顺序，不参与排序和拖拽换序
+    assert "'select', 'row_number'" in html
+    assert ':not([data-column="row_number"])' in html

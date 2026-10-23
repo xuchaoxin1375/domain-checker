@@ -24,7 +24,8 @@ Base URL：`http://localhost:5000`（或启动日志输出的地址）。所有�
   "max_retries": 3,
   "retry_delay": 2,
   "timeout": 15,                  // WHOIS/RDAP/DNS/HTTP 单次网络请求超时，范围 1-120
-  "max_workers": 5,
+  "max_workers": 5,               // 每个任务的并发线程数，范围 1-32
+  "reuse_recent_seconds": 600,    // 最近成功结果复用窗口（秒），0 表示关闭
   "proxy_enabled": false,
   "proxy_url": "http://127.0.0.1:7897",
   "platform": "rdap",             // rdap（默认）| whois | whoisxml
@@ -51,6 +52,9 @@ Base URL：`http://localhost:5000`（或启动日志输出的地址）。所有�
 Body 为任意配置键子集，类型自动转换；修改后自动写入 `data/settings.json`。
 `timeout` 为 WHOIS、RDAP、DNS 和 HTTP 每次网络请求的超时秒数，服务端限制为 1-120 秒。
 它不是单域名或整批任务总时限；重试、RDAP 回退和后续探测会累计计入查询耗时。
+`max_workers` 为每个任务的线程池上限（1-32），任务开始后修改只影响后续任务；
+`reuse_recent_seconds` 控制最近成功结果的复用窗口（0-86400 秒，0 表示关闭）。
+数值项超出范围会自动收敛到边界；无法转换为数字时返回 `400`，且整次请求不会部分生效。
 
 ```bash
 curl -X POST localhost:5000/api/config \
@@ -88,6 +92,10 @@ curl -X POST localhost:5000/api/config \
 重查使用的单次网络尝试超时，范围 1-120 秒，传递给 WHOIS、RDAP、DNS 和 HTTP 探测；省略时使用
 全局 `timeout`。它不是整批任务的总时限；非简略模式的失败重试和 DNS 自动复查会累加整体耗时。
 
+新任务会先查询 `reuse_recent_seconds` 窗口内最近一次成功且 DNS 有明确结论（`resolved` 为
+`true`/`false`）的历史结果并直接复用，命中项在结果中带 `reused=true`，且不再发起 RDAP/WHOIS/DNS
+请求。重查接口（`/api/retry`、`/api/retry-failed`）始终强制联网查询，不受复用影响。
+
 错误：`400` 无有效域名；`400` 超过 `max_domains_per_batch`。
 
 ### GET /api/status/{task_id}
@@ -115,6 +123,7 @@ curl -X POST localhost:5000/api/config \
       "name_servers": "ns1.x.com", "dnssec": null, "error": null,
       "resolved": true, "block_reason": null, "dns_records": ["1.2.3.4"],
       "query_time": "2026-07-28 12:00:01", "query_duration_seconds": 2.34,
+      "reused": false,
       "raw_response": "Domain Name: X.COM\n..."
   } ],
   "logs": [ {"time":"11:10:07","level":"warn","message":"[x.com] DNS 检查异常..."} ],
@@ -152,6 +161,8 @@ DNS 超时或意外异常会自动复查一次；仍为 `null` 时 `block_reason
 `serverHold` 时，`resolved=false` 且 `block_reason` 会明确标记为「停止解析（域名被封）」。
 `query_time` 为该域名开始查询的本地时间，`query_duration_seconds` 为 WHOIS 重试、RDAP 回退、DNS、
 HTTP 探测及等待时间合计的完整流水线耗时，因此可以大于 `query_timeout`。
+`reused=true` 表示该行复用了窗口内的最近成功结果：`query_time` 与 `query_duration_seconds`
+仍为原始查询的数据，便于判断结果新鲜度；本次任务没有发起网络请求。
 `raw_response` 保存 WHOIS 原始文本或 RDAP 原始 JSON，供详细结果查看；可能为 `null`。
 `contact_email` 为 WHOIS/RDAP 能提供的联系邮箱（RDAP 优先投诉联系人），可能为 `null`。
 `refresh=true` 表示发生了重查，前端应丢弃旧全表。`log_after` 传入上次响应的

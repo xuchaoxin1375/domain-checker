@@ -13,6 +13,7 @@ class TestConfig:
     def test_get_shape(self, client):
         data = client.get('/api/config').get_json()
         assert 'allow_lan_access' in data
+        assert 'reuse_recent_seconds' in data
         assert 'platforms' in data
         assert 'server' in data
         assert set(data['server']) == {'bind_host', 'port', 'lan_active'}
@@ -58,6 +59,38 @@ class TestConfig:
     def test_invalid_platform_falls_back_to_rdap(self, client):
         client.post('/api/config', json={'platform': 'nope'})
         assert client.get('/api/config').get_json()['platform'] == 'rdap'
+
+    def test_workers_and_reuse_window_are_clamped(self, client):
+        original = client.get('/api/config').get_json()
+        try:
+            resp = client.post('/api/config', json={
+                'max_workers': 999, 'reuse_recent_seconds': -5,
+            })
+            assert resp.status_code == 200
+            data = resp.get_json()['config']
+            assert data['max_workers'] == 32
+            assert data['reuse_recent_seconds'] == 0
+
+            client.post('/api/config', json={'max_workers': 0})
+            assert client.get('/api/config').get_json()['max_workers'] == 1
+        finally:
+            client.post('/api/config', json={
+                'max_workers': original['max_workers'],
+                'reuse_recent_seconds': original['reuse_recent_seconds'],
+            })
+
+    def test_invalid_numeric_config_is_rejected_without_partial_update(self, client):
+        before = client.get('/api/config').get_json()
+
+        resp = client.post('/api/config', json={
+            'max_workers': 7, 'rate_limit_delay': 'abc',
+        })
+
+        assert resp.status_code == 400
+        assert 'rate_limit_delay' in resp.get_json()['error']
+        after = client.get('/api/config').get_json()
+        assert after['max_workers'] == before['max_workers']
+        assert after['rate_limit_delay'] == before['rate_limit_delay']
 
     def test_platforms_have_impl_and_desc(self, client):
         platforms = client.get('/api/config').get_json()['platforms']

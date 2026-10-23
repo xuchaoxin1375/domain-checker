@@ -31,8 +31,7 @@ from .operations import get_operations, record_operation
 from .settings import (
     CONFIG,
     PLATFORMS,
-    TIMEOUT_MAX_SECONDS,
-    TIMEOUT_MIN_SECONDS,
+    coerce_config_value,
     config_lock,
     get_server_info,
     load_config_from_file,
@@ -131,29 +130,30 @@ def _register_routes(flask_app: Flask):
     @flask_app.route('/api/config', methods=['GET', 'POST'])
     def api_config():
         if request.method == 'POST':
-            data = request.get_json()
-            with config_lock:
-                old_allow_lan = bool(CONFIG.get('allow_lan_access', True))
+            data = request.get_json(silent=True)
+            if not isinstance(data, dict):
+                return jsonify({'error': '请求体必须是 JSON 对象'}), 400
+
+            # 先整体校验再写入，避免部分配置生效
+            updates = {}
+            try:
                 for key in CONFIG:
                     if key in data:
-                        val = data[key]
-                        if key in ['max_domains_per_batch', 'max_retries', 'timeout', 'max_workers']:
-                            val = int(val)
-                            if key == 'timeout':
-                                val = max(TIMEOUT_MIN_SECONDS, min(TIMEOUT_MAX_SECONDS, val))
-                        elif key in ['rate_limit_delay', 'retry_delay']:
-                            val = float(val)
-                        elif key in ['proxy_enabled', 'allow_lan_access']:
-                            val = bool(val)
-                        elif key == 'platform':
-                            val = val if val in PLATFORMS else 'rdap'
-                        CONFIG[key] = val
-                lan_changed = bool(data.get('allow_lan_access', old_allow_lan)) != old_allow_lan
+                        updates[key] = coerce_config_value(key, data[key])
+            except ValueError as exc:
+                return jsonify({'error': str(exc)}), 400
+
+            with config_lock:
+                old_allow_lan = bool(CONFIG.get('allow_lan_access', True))
+                CONFIG.update(updates)
+                lan_changed = bool(CONFIG.get('allow_lan_access', True)) != old_allow_lan
 
             # 持久化到文件，保证重启后配置（含局域网访问设置）仍可生效
             save_config_to_file()
             logger.info(
                 f"配置已更新: platform={CONFIG['platform']}, "
+                f"max_workers={CONFIG['max_workers']}, "
+                f"reuse_recent_seconds={CONFIG['reuse_recent_seconds']}, "
                 f"proxy_enabled={CONFIG['proxy_enabled']}, "
                 f"allow_lan_access={CONFIG['allow_lan_access']}")
 

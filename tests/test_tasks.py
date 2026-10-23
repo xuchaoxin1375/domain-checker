@@ -1,13 +1,17 @@
 """批量任务编排与重查状态测试。"""
 
 import threading
+import time
+from datetime import datetime
 from unittest import mock
 
+from domain_checker import db
 from domain_checker.settings import CONFIG
 from domain_checker.state import task_lock, task_pause_flags, task_storage, wait_for_task_resume
 from domain_checker.tasks import (
     _complete_operation,
     _process_domain_worker,
+    _run_pool,
     _worker_config,
     create_queued_result,
     process_domains_async,
@@ -118,13 +122,15 @@ def test_process_domains_uses_configured_worker_count(monkeypatch):
         }
 
     def fake_run_pool(domains, task_id, max_workers, track_operation=False,
-                      query_mode='unlimited', query_timeout=None, platform='rdap'):
+                      query_mode='unlimited', query_timeout=None, platform='rdap',
+                      reuse_map=None):
         captured.update(
             max_workers=max_workers,
             track_operation=track_operation,
             query_mode=query_mode,
             query_timeout=query_timeout,
             platform=platform,
+            reuse_map=reuse_map,
             paused_before_pool=task_pause_flags.get(task_id, False),
         )
         with task_lock:
@@ -237,3 +243,193 @@ def test_retry_replaces_result_with_client_hold_and_persists(monkeypatch):
     finally:
         with task_lock:
             task_storage.pop('RETRYHOLD', None)
+
+
+class TestResultReuse:
+    def _task(self, task_id, domains, operation='query'):
+        now = '2026-08-01T10:00:00'
+        with task_lock:
+            task_storage[task_id] = {
+                'status': 'processing', 'total': len(domains), 'completed': 0,
+                'results': [create_queued_result(domain) for domain in domains],
+                'logs': [], 'refresh': False,
+                'created_at': now, 'completed_at': None, 'platform': 'rdap',
+                'operation': operation,
+                'operation_total': len(domains), 'operation_completed': 0,
+                'operation_started_at': now, 'duration_seconds': None,
+                'paused_duration_seconds': 0.0, '_paused_started_monotonic': None,
+            }
+
+    def test_query_passes_reuse_map_and_logs_hit(self, monkeypatch):
+        cached = {
+            'domain': 'cached.com', 'status': 'success', 'resolved': True,
+            'query_time': '2026-08-01 09:55:00', 'query_duration_seconds': 1.2,
+        }
+        captured = {}
+        self._task('REUSE01', ['cached.com', 'fresh.com'])
+        monkeypatch.setitem(CONFIG, 'reuse_recent_seconds', 600)
+        lookup = mock.Mock(return_value={'cached.com': cached})
+        monkeypatch.setattr('domain_checker.tasks.find_recent_success_results', lookup)
+
+        def fake_run_pool(domains, task_id, max_workers, **kwargs):
+            captured.update(kwargs)
+            with task_lock:
+                task_storage[task_id]['completed'] = len(domains)
+                task_storage[task_id]['operation_completed'] = len(domains)
+
+        monkeypatch.setattr('domain_checker.tasks._run_pool', fake_run_pool)
+        monkeypatch.setattr('domain_checker.tasks.save_history', lambda *args: None)
+        monkeypatch.setattr('domain_checker.tasks.save_results', lambda *args: None)
+        monkeypatch.setattr('domain_checker.tasks.update_history_counts', lambda *args: None)
+
+        try:
+            process_domains_async(['cached.com', 'fresh.com'], 'REUSE01')
+
+            lookup.assert_called_once_with(['cached.com', 'fresh.com'], 600)
+            assert captured['reuse_map'] == {'cached.com': cached}
+            with task_lock:
+                logs = [log['message'] for log in task_storage['REUSE01']['logs']]
+            assert any('命中 1 条' in message for message in logs)
+        finally:
+            with task_lock:
+                task_storage.pop('REUSE01', None)
+
+    def test_retry_always_runs_fresh(self, monkeypatch):
+        captured = {}
+        self._task('RETRYREUSE', ['retry.com'], operation='retry')
+        lookup = mock.Mock(side_effect=AssertionError('重查不得读取复用缓存'))
+        monkeypatch.setattr('domain_checker.tasks.find_recent_success_results', lookup)
+
+        def fake_run_pool(domains, task_id, max_workers, **kwargs):
+            captured.update(kwargs)
+            with task_lock:
+                task_storage[task_id]['results'] = [
+                    {'domain': domain, 'status': 'success'} for domain in domains
+                ]
+
+        monkeypatch.setattr('domain_checker.tasks._run_pool', fake_run_pool)
+        monkeypatch.setattr('domain_checker.tasks.save_results', lambda *args: None)
+        monkeypatch.setattr('domain_checker.tasks.update_history_counts', lambda *args: None)
+
+        try:
+            retry_domains_async(['retry.com'], 'RETRYREUSE')
+
+            lookup.assert_not_called()
+            assert captured.get('reuse_map') is None
+        finally:
+            with task_lock:
+                task_storage.pop('RETRYREUSE', None)
+
+    def test_worker_forwards_cached_result(self, monkeypatch):
+        cached = {'domain': 'forward.com', 'status': 'success'}
+        seen = {}
+        self._task('FORWARD', ['forward.com'])
+
+        def fake_process(domain, task_id, **kwargs):
+            seen.update(kwargs)
+            return {'domain': domain, 'status': 'success'}
+
+        monkeypatch.setattr('domain_checker.tasks.process_single_domain', fake_process)
+        try:
+            _process_domain_worker('forward.com', 'FORWARD', cached_result=cached)
+            assert seen['cached_result'] is cached
+        finally:
+            with task_lock:
+                task_storage.pop('FORWARD', None)
+
+
+def test_run_pool_actually_uses_configured_workers(monkeypatch):
+    """并发设置必须真的并行执行，而不只是写进日志。"""
+    domains = [f'concurrent{i}.com' for i in range(4)]
+    now = '2026-08-01T10:00:00'
+    with task_lock:
+        task_storage['POOLCONC'] = {
+            'status': 'processing', 'total': len(domains), 'completed': 0,
+            'results': [create_queued_result(domain) for domain in domains],
+            'logs': [], 'refresh': False, 'platform': 'rdap',
+            'created_at': now, 'completed_at': None, 'duration_seconds': None,
+        }
+
+    lock = threading.Lock()
+    state = {'active': 0, 'peak': 0}
+
+    def fake_process(domain, task_id, **_kwargs):
+        with lock:
+            state['active'] += 1
+            state['peak'] = max(state['peak'], state['active'])
+        time.sleep(0.05)
+        with lock:
+            state['active'] -= 1
+        return {'domain': domain, 'status': 'success'}
+
+    monkeypatch.setattr('domain_checker.tasks.process_single_domain', fake_process)
+    try:
+        _run_pool(domains, 'POOLCONC', max_workers=2)
+        assert state['peak'] == 2
+        assert state['active'] == 0
+    finally:
+        with task_lock:
+            task_storage.pop('POOLCONC', None)
+
+
+def test_worker_config_clamps_unsafe_values(monkeypatch):
+    monkeypatch.setitem(CONFIG, 'max_workers', 999)
+    monkeypatch.setitem(CONFIG, 'rate_limit_delay', -5)
+
+    cfg = _worker_config('standard')
+
+    assert cfg['max_workers'] == 32
+    assert cfg['rate_limit_delay'] == 0
+
+
+def test_recent_success_result_is_reused_end_to_end(monkeypatch):
+    """真实串联 DB 查询 → 工作线程 → 单域名流水线：命中复用时不发网络请求。"""
+    task_id = 'REUSEE2E'
+    domain = 'reuse-e2e.com'
+    db.save_history(task_id, [domain], 'processing')
+    db.save_results(task_id, [{
+        'domain': domain, 'status': 'success', 'registrar': 'Cached Registrar',
+        'whois_status': 'ok', 'hold_status': '', 'resolved': True,
+        'block_reason': '', 'dns_records': ['1.2.3.4'], 'error': '',
+        'raw_response': 'raw', 'query_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'query_duration_seconds': 3.5,
+    }])
+    db.update_history_counts(task_id, 1, 0)
+
+    now = '2026-08-01T10:00:00'
+    with task_lock:
+        task_storage['REUSEJOB'] = {
+            'status': 'processing', 'total': 1, 'completed': 0,
+            'results': [create_queued_result(domain)], 'logs': [], 'refresh': False,
+            'created_at': now, 'completed_at': None, 'platform': 'rdap',
+            'operation': 'query', 'operation_total': 1, 'operation_completed': 0,
+            'operation_started_at': now, 'duration_seconds': None,
+        }
+
+    query = mock.Mock(side_effect=AssertionError('命中复用后不得联网查询注册信息'))
+    dns_check = mock.Mock(side_effect=AssertionError('命中复用后不得联网检查 DNS'))
+    monkeypatch.setitem(CONFIG, 'reuse_recent_seconds', 600)
+    monkeypatch.setattr('domain_checker.checker.query_registration_with_retry', query)
+    monkeypatch.setattr('domain_checker.checker.check_domain_resolved', dns_check)
+    monkeypatch.setattr('domain_checker.tasks.save_history', lambda *args: None)
+    monkeypatch.setattr('domain_checker.tasks.save_results', lambda *args: None)
+    monkeypatch.setattr('domain_checker.tasks.update_history_counts', lambda *args: None)
+
+    try:
+        process_domains_async([domain], 'REUSEJOB')
+
+        query.assert_not_called()
+        dns_check.assert_not_called()
+        with task_lock:
+            task = task_storage['REUSEJOB']
+            result = task['results'][0]
+            assert task['status'] == 'completed'
+            assert task['operation_completed'] == 1
+            assert result['reused'] is True
+            assert result['registrar'] == 'Cached Registrar'
+            assert result['query_duration_seconds'] == 3.5
+        assert any('复用最近成功结果' in log['message'] for log in task['logs'])
+    finally:
+        with task_lock:
+            task_storage.pop('REUSEJOB', None)
+        db.delete_history(task_id)

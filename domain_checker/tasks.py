@@ -8,11 +8,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 from .checker import process_single_domain
-from .db import save_history, save_results, update_history_counts
+from .db import find_recent_success_results, save_history, save_results, update_history_counts
 from .settings import (
     CONFIG,
     PLATFORMS,
     QUERY_MODES,
+    coerce_config_value,
     config_lock,
     is_platform_implemented,
     normalize_query_mode,
@@ -38,18 +39,34 @@ def create_queued_result(domain: str) -> dict:
         'name_servers': None, 'dnssec': None, 'whois_status': None, 'hold_status': None,
         'resolved': None, 'block_reason': None, 'dns_records': None,
         'error': None, 'raw_response': None, 'query_time': None,
-        'query_duration_seconds': None,
+        'query_duration_seconds': None, 'reused': False,
     }
+
+
+def _config_int(key: str, default: int) -> int:
+    """读取整型配置；非法值回落到默认值，绝不让任务线程因配置异常退出。"""
+    try:
+        return int(coerce_config_value(key, CONFIG.get(key, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _config_float(key: str, default: float) -> float:
+    """读取浮点配置；非法值回落到默认值。"""
+    try:
+        return float(coerce_config_value(key, CONFIG.get(key, default)))
+    except (TypeError, ValueError):
+        return default
 
 
 def _worker_config(query_mode: str = 'unlimited', query_timeout: int | None = None) -> dict:
     with config_lock:
         cfg = {
-            'max_workers': max(1, int(CONFIG['max_workers'])),
-            'max_retries': max(1, int(CONFIG['max_retries'])),
-            'rate_limit_delay': float(CONFIG['rate_limit_delay']),
+            'max_workers': _config_int('max_workers', 5),
+            'max_retries': _config_int('max_retries', 3),
+            'rate_limit_delay': _config_float('rate_limit_delay', 1.0),
             'timeout': normalize_timeout(query_timeout if query_timeout is not None else CONFIG['timeout']),
-            'retry_delay': float(CONFIG['retry_delay']),
+            'retry_delay': _config_float('retry_delay', 2.0),
         }
     query_mode = normalize_query_mode(query_mode)
     mode_config = QUERY_MODES[query_mode]
@@ -61,8 +78,26 @@ def _worker_config(query_mode: str = 'unlimited', query_timeout: int | None = No
     return cfg
 
 
+def _reusable_results(domains: list[str]) -> dict[str, dict]:
+    """读取复用窗口内的最近成功结果；缓存读取失败不影响正常查询。"""
+    with config_lock:
+        raw_ttl = CONFIG.get('reuse_recent_seconds', 0)
+    try:
+        ttl = int(coerce_config_value('reuse_recent_seconds', raw_ttl))
+    except ValueError:
+        return {}
+    if ttl <= 0:
+        return {}
+    try:
+        return find_recent_success_results(domains, ttl)
+    except Exception as exc:
+        logger.warning(f"读取最近成功结果失败，本次不使用复用: {str(exc)[:80]}")
+        return {}
+
+
 def _process_domain_worker(domain: str, task_id: str, query_mode: str = 'unlimited',
-                           query_timeout: int | None = None, platform: str = 'rdap'):
+                           query_timeout: int | None = None, platform: str = 'rdap',
+                           cached_result: dict | None = None):
     """等待任务可运行后处理域名，并把任务 ID 传给深层重试日志。"""
     if not wait_for_task_resume(task_id):
         return None
@@ -88,6 +123,7 @@ def _process_domain_worker(domain: str, task_id: str, query_mode: str = 'unlimit
             query_mode=normalize_query_mode(query_mode),
             query_timeout=query_timeout,
             platform=platform,
+            cached_result=cached_result,
         )
     finally:
         if previous_task_id is None:
@@ -108,7 +144,7 @@ def _record_worker_failure(domain: str, task_id: str, exc: Exception) -> None:
         'resolved': None, 'block_reason': None, 'dns_records': None,
         'error': error, 'raw_response': None,
         'query_time': datetime.now().replace(microsecond=0).isoformat(sep=' '),
-        'query_duration_seconds': 0,
+        'query_duration_seconds': 0, 'reused': False,
     }
     with task_lock:
         task = task_storage.get(task_id)
@@ -133,11 +169,13 @@ def _record_worker_failure(domain: str, task_id: str, exc: Exception) -> None:
 
 def _run_pool(domains: list[str], task_id: str, max_workers: int,
               track_operation: bool = False, query_mode: str = 'unlimited',
-              query_timeout: int | None = None, platform: str = 'rdap') -> None:
+              query_timeout: int | None = None, platform: str = 'rdap',
+              reuse_map: dict[str, dict] | None = None) -> None:
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix=f'domain-{task_id}') as executor:
         futures = {
             executor.submit(
                 _process_domain_worker, domain, task_id, query_mode, query_timeout, platform,
+                (reuse_map or {}).get(domain),
             ): domain
             for domain in domains
         }
@@ -204,6 +242,16 @@ def process_domains_async(domains: list, task_id: str):
         f"查询参数：超时 {cfg['timeout']} 秒，最多尝试 {cfg['max_retries']} 次，请求间隔 {cfg['rate_limit_delay']:.1f} 秒，失败重试等待 {cfg['retry_delay']:.1f} 秒",
     )
 
+    reuse_map = _reusable_results(domains)
+    if reuse_map:
+        with config_lock:
+            reuse_ttl = CONFIG.get('reuse_recent_seconds', 0)
+        append_task_log(
+            task_id,
+            'info',
+            f"命中 {len(reuse_map)} 条 {reuse_ttl} 秒内的成功结果，复用并跳过网络查询；重查操作始终强制联网",
+        )
+
     with task_lock:
         platform = task_storage[task_id].get('platform', 'rdap')
     if not is_platform_implemented(platform):
@@ -217,7 +265,7 @@ def process_domains_async(domains: list, task_id: str):
     _run_pool(
         domains, task_id, cfg['max_workers'], track_operation=True,
         query_mode=query_mode, query_timeout=query_timeout,
-        platform=platform,
+        platform=platform, reuse_map=reuse_map,
     )
 
     completed = _complete_operation(task_id, started, '查询', len(domains))

@@ -310,6 +310,18 @@
             color: var(--text-primary);
             transition: background 0.3s, color 0.3s, border-color 0.3s;
         }
+        .config-note {
+            margin-top: 10px;
+            font-size: 12px;
+            line-height: 1.6;
+            color: var(--text-secondary);
+        }
+        .config-note code {
+            padding: 1px 5px;
+            border-radius: 4px;
+            background: var(--bg-main);
+            border: 1px solid var(--border-color);
+        }
         
         /* 代理配置 */
         .proxy-section {
@@ -577,6 +589,13 @@
         tr:hover { background: var(--bg-main); }
         
         .checkbox-cell { width: 35px; text-align: center; }
+        .row-number-cell {
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
         input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--primary); }
         
         .badge {
@@ -1172,11 +1191,16 @@
                 </div>
                 
                 <div class="config-grid">
-                    <div class="config-item"><label>限流(秒):</label><input type="number" id="cfgRateLimit" step="0.1" min="0.1" value="1.0"></div>
+                    <div class="config-item"><label>限流(秒):</label><input type="number" id="cfgRateLimit" step="0.1" min="0" max="60" value="1.0" title="RDAP 与 WHOIS 每次请求前的主动等待；不限流模式为 0"></div>
                     <div class="config-item"><label>重试:</label><input type="number" id="cfgRetries" min="1" max="10" value="3"></div>
-                    <div class="config-item"><label>并发:</label><input type="number" id="cfgWorkers" min="1" max="10" value="5"></div>
+                    <div class="config-item"><label>并发:</label><input type="number" id="cfgWorkers" min="1" max="32" value="5" title="每个任务的并发线程上限（1-32）；修改后在下一个任务生效"></div>
                     <div class="config-item"><label>默认单次超时(秒):</label><input type="number" id="cfgTimeout" min="1" max="120" value="15" onchange="syncQueryTimeoutFromDefault()" title="每次 WHOIS、RDAP、DNS 或 HTTP 请求的超时；重试会累计总耗时"></div>
                     <div class="config-item"><label>单批上限:</label><input type="number" id="cfgMaxBatch" min="10" max="1000" value="500"></div>
+                    <div class="config-item"><label>结果复用(秒):</label><input type="number" id="cfgReuse" min="0" max="86400" step="30" value="600" title="复用该窗口内最近一次成功且 DNS 有结论的结果；0 表示关闭"></div>
+                </div>
+                <div class="config-note">
+                    并发是<strong>每个任务</strong>的线程池上限，任务开始后修改配置只影响后续任务；多个任务同时运行会各自占用线程。
+                    结果复用只复用窗口内「查询成功且 DNS 有结论」的记录，命中后跳过网络查询；点「重查」始终强制联网。
                 </div>
                 
                 <!-- 平台选择 -->
@@ -1360,6 +1384,7 @@ https://www.example.com/path/to/page"></textarea>
                     <table id="resultsTable">
                         <colgroup>
                             <col data-column="select" style="width: 48px">
+                            <col data-column="row_number" style="width: 56px">
                             <col data-column="domain" style="width: 300px">
                             <col data-column="query_time" style="width: 155px">
                             <col data-column="query_duration_seconds" style="width: 95px">
@@ -1379,6 +1404,7 @@ https://www.example.com/path/to/page"></textarea>
                                 <th class="checkbox-cell" data-column="select">
                                     <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()">
                                 </th>
+                                <th class="row-number-cell" data-column="row_number" title="按当前展示顺序编号">序号</th>
                                 <th data-column="domain" data-sort="domain" onclick="sortTable('domain')">域名<span class="sort-icon">⇅</span></th>
                                 <th data-column="query_time" data-sort="query_time" onclick="sortTable('query_time')">查询时间<span class="sort-icon">⇅</span></th>
                                 <th data-column="query_duration_seconds" data-sort="query_duration_seconds" onclick="sortTable('query_duration_seconds')">查询耗时<span class="sort-icon">⇅</span></th>
@@ -1557,7 +1583,7 @@ https://www.example.com/path/to/page"></textarea>
         let suppressColumnSort = false;
         let draggedColumnKey = null;
         const defaultResultColumnOrder = [
-            'select', 'domain', 'query_time', 'query_duration_seconds', 'query_state',
+            'select', 'row_number', 'domain', 'query_time', 'query_duration_seconds', 'query_state',
             'status', 'resolved', 'whois_status', 'registrar', 'contact_email',
             'registration_date', 'expiration_date', 'name_servers', 'error'
         ];
@@ -1853,6 +1879,7 @@ https://www.example.com/path/to/page"></textarea>
                 max_workers: parseInt(document.getElementById('cfgWorkers').value),
                 timeout: parseInt(document.getElementById('cfgTimeout').value),
                 max_domains_per_batch: parseInt(document.getElementById('cfgMaxBatch').value),
+                reuse_recent_seconds: parseInt(document.getElementById('cfgReuse').value),
                 proxy_enabled: document.getElementById('cfgProxyEnabled').checked,
                 proxy_url: document.getElementById('cfgProxyUrl').value,
                 allow_lan_access: document.getElementById('cfgLanAccess').checked,
@@ -1880,6 +1907,7 @@ https://www.example.com/path/to/page"></textarea>
                 document.getElementById('cfgTimeout').value = config.timeout;
                 document.getElementById('queryTimeout').value = config.timeout;
                 document.getElementById('cfgMaxBatch').value = config.max_domains_per_batch;
+                document.getElementById('cfgReuse').value = config.reuse_recent_seconds;
                 document.getElementById('cfgProxyEnabled').checked = config.proxy_enabled;
                 document.getElementById('cfgProxyUrl').value = config.proxy_url || 'http://127.0.0.1:7897';
                 document.getElementById('cfgLanAccess').checked = config.allow_lan_access !== false;
@@ -2224,7 +2252,7 @@ https://www.example.com/path/to/page"></textarea>
             tbody.innerHTML = '';
             const visibleResults = getFilteredResults();
             
-            visibleResults.forEach(r => {
+            visibleResults.forEach((r, index) => {
                 const tr = document.createElement('tr');
                 tr.dataset.domain = r.domain;
                 
@@ -2235,7 +2263,7 @@ https://www.example.com/path/to/page"></textarea>
                                   queryState === 'querying' ? '<span class="badge badge-querying">正在查询</span>' :
                                   queryState === 'paused' ? '<span class="badge badge-paused">已暂停</span>' :
                                   queryState === 'cancelled' ? '<span class="badge badge-cancelled">已终止</span>' :
-                                  r.status === 'success' || r.status === 'not_registered' ? '<span class="badge badge-success">✓ 查询成功</span>' :
+                                  r.status === 'success' || r.status === 'not_registered' ? `<span class="badge badge-success"${r.reused ? ' title="复用最近一次成功查询，未发起网络请求"' : ''}>✓ 查询成功${r.reused ? ' · 复用' : ''}</span>` :
                                   r.status === 'timeout' ? '<span class="badge badge-timeout">⏱ 查询超时</span>' :
                                   r.status === 'failed' ? `<span class="badge badge-failed">✗ 查询失败 · ${escapeHtml(failure)}</span>` :
                                   '<span class="badge badge-invalid">无效</span>';
@@ -2270,6 +2298,7 @@ https://www.example.com/path/to/page"></textarea>
                 
                 tr.innerHTML = `
                     <td class="checkbox-cell" data-column="select"><input type="checkbox" ${checked} ${pendingDisabled} onchange="toggleSelect('${escapeHtml(r.domain)}')"></td>
+                    <td class="row-number-cell" data-column="row_number">${index + 1}</td>
                     <td data-column="domain"><span class="domain-cell-wrap"><a class="domain-cell" href="https://${escapeHtml(r.domain)}" target="_blank" rel="noopener noreferrer" title="打开网站">${escapeHtml(r.domain)}</a><button type="button" class="retry-domain-btn" ${pendingDisabled} onclick="retrySingle('${escapeHtml(r.domain)}')" title="重新查询此域名" aria-label="重新查询此域名">↻ 重查</button><button type="button" class="detail-result-btn" onclick="showResultDetails('${escapeHtml(r.domain)}')" title="查看详细结果" aria-label="查看 ${escapeHtml(r.domain)} 的详细结果">详细结果</button><button type="button" class="copy-domain-btn" onclick="copyDomain(this, '${escapeHtml(r.domain)}')" title="复制域名" aria-label="复制域名 ${escapeHtml(r.domain)}">⧉</button></span></td>
                     <td class="query-time-cell" data-column="query_time">${escapeHtml(r.query_time || '')}</td>
                     <td class="query-time-cell" data-column="query_duration_seconds">${formatResultDuration(r.query_duration_seconds)}</td>
@@ -2286,6 +2315,7 @@ https://www.example.com/path/to/page"></textarea>
                 `;
 
                 const copyValues = [
+                    index + 1,
                     r.domain, r.query_time, formatResultDuration(r.query_duration_seconds),
                     resultStatusText(r), resultRegistrationText(r), resultResolutionText(r),
                     r.whois_status, r.registrar, r.contact_email,
@@ -2397,7 +2427,9 @@ https://www.example.com/path/to/page"></textarea>
             if (result.query_state === 'querying') return '正在查询';
             if (result.query_state === 'paused') return '已暂停';
             if (result.query_state === 'cancelled') return '已终止';
-            if (result.status === 'success' || result.status === 'not_registered') return '查询成功';
+            if (result.status === 'success' || result.status === 'not_registered') {
+                return result.reused ? '查询成功（复用最近结果）' : '查询成功';
+            }
             if (result.status === 'timeout') return '查询超时';
             if (result.status === 'failed') return `查询失败 · ${resultFailureReason(result)}`;
             return '格式无效';
@@ -2471,6 +2503,8 @@ https://www.example.com/path/to/page"></textarea>
                 ['DNS 记录', result.dns_records],
                 ['查询时间', result.query_time],
                 ['查询耗时', formatResultDuration(result.query_duration_seconds)],
+                ['结果来源', result.reused ? '复用最近成功结果，未发起网络请求' : '本次实时查询'],
+                ['结果来源', result.reused ? '复用最近成功结果，未发起网络请求' : '本次实时查询'],
                 ['解析异常原因', result.block_reason],
                 ['错误备注', result.error],
                 ['接口原始返回', result.raw_response],
@@ -2966,13 +3000,14 @@ https://www.example.com/path/to/page"></textarea>
                 localStorage.removeItem('domainCheckerColumnOrder');
             }
             const known = new Set(defaultResultColumnOrder);
+            const fixed = new Set(['select', 'row_number']);
             const movable = saved.filter((key, index) =>
-                key !== 'select' && known.has(key) && saved.indexOf(key) === index
+                !fixed.has(key) && known.has(key) && saved.indexOf(key) === index
             );
             defaultResultColumnOrder.forEach(key => {
-                if (key !== 'select' && !movable.includes(key)) movable.push(key);
+                if (!fixed.has(key) && !movable.includes(key)) movable.push(key);
             });
-            return ['select', ...movable];
+            return ['select', 'row_number', ...movable];
         }
 
         function applyColumnOrder(order) {
@@ -2993,7 +3028,7 @@ https://www.example.com/path/to/page"></textarea>
 
         function initDraggableColumns() {
             const table = document.getElementById('resultsTable');
-            table.querySelectorAll('thead th[data-column]:not([data-column="select"])').forEach(header => {
+            table.querySelectorAll('thead th[data-column]:not([data-column="select"]):not([data-column="row_number"])').forEach(header => {
                 header.draggable = true;
                 header.title = '点击排序；拖动调整列顺序';
                 header.addEventListener('dragstart', event => {
@@ -3045,7 +3080,8 @@ https://www.example.com/path/to/page"></textarea>
 
         function initResizableColumns() {
             const table = document.getElementById('resultsTable');
-            const headers = Array.from(table.querySelectorAll('thead th'));
+            const headers = Array.from(table.querySelectorAll('thead th'))
+                .filter(header => header.dataset.column !== 'row_number');
             let saved = {};
             try {
                 const value = JSON.parse(localStorage.getItem('domainCheckerColumnWidths') || '{}');
