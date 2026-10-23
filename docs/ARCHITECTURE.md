@@ -163,10 +163,10 @@ SQLite（`query_history` + `query_results`），表结构见 `db.init_db()` 的 
   和超时约束，盲目调高线程数只会增加超时与限流概率。
 - 限流 `rate_limit_delay` 同时作用于 RDAP（默认平台）与 WHOIS；查询模式只能收紧配置值，
   `unlimited` 固定为 0。RDAP 回退 WHOIS 时会在两个协议阶段各自等待。
-- 最近成功结果复用：新任务按 `reuse_recent_seconds`（默认 600 秒，0 关闭）查询 SQLite 中
+- 最近成功结果复用：新任务按 `reuse_recent_seconds`（默认 3600 秒即 1 小时，0 关闭）查询 SQLite 中
   `status=success` 且 `resolved` 有结论的最新记录。命中项跳过 RDAP/WHOIS/DNS/HTTP 并把
-  `reused=true` 写回结果；新鲜度按原始 `query_time` 计算，复用结果再次落库不会延长 TTL。
-  重查（`retry`/`retry-failed`）始终强制联网，不读取复用缓存。
+  `reused=true` 写回结果并持久化；新鲜度按原始 `query_time` 计算，复用结果再次落库不会延长 TTL。
+  查询请求可带 `ignore_cache=true` 跳过复用；重查（`retry`/`retry-failed`）始终强制联网。
 - 查询任务支持 `unlimited`/`standard`/`quick`/`brief` 四种模式，默认 `unlimited` 不添加主动等待。
   前三种只调整注册查询与失败重试等待；`brief` 最多执行一次 WHOIS 尝试、一次 DNS 查询，跳过 HTTP
   探测与 DNS 自动复查，因此瞬时故障更容易显示未知或失败，但不会放宽未注册判定。任务可通过

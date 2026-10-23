@@ -335,6 +335,14 @@ def test_concurrency_and_reuse_settings_are_wired(client):
     assert 'reuse_recent_seconds: parseInt' in html
     assert "document.getElementById('cfgReuse').value = config.reuse_recent_seconds" in html
     assert '重查」始终强制联网' in html
+    # 默认 1 小时复用窗口 + 查询级忽略缓存开关
+    assert 'id="cfgReuse" min="0" max="86400" step="60" value="3600"' in html
+    assert 'id="ignoreCache"' in html
+    assert '默认复用 1 小时内成功结果' in html
+    assert "ignore_cache: document.getElementById('ignoreCache').checked" in html
+    assert "document.getElementById('ignoreCache').checked = Boolean(ignoreCache)" in html
+    # 历史详情同样保留复用来源，重新加载后不会误标为实时查询
+    assert 'reused: Boolean(r.reused)' in html
     # 命中复用的结果在状态列可见，详细结果说明来源
     assert "✓ 查询成功${r.reused ? " in html
     assert '查询成功（复用最近结果）' in html

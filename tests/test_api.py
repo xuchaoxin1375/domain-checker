@@ -170,6 +170,23 @@ class TestQueryValidation:
             with task_lock:
                 task_storage.pop(data['task_id'], None)
 
+    def test_query_accepts_ignore_cache(self, client, monkeypatch):
+        monkeypatch.setattr('domain_checker.web.process_domains_async', lambda *args: None)
+        resp = client.post('/api/query', json={'domains': 'cached.com', 'ignore_cache': True})
+        data = resp.get_json()
+        try:
+            assert resp.status_code == 200
+            assert data['ignore_cache'] is True
+            assert '忽略缓存' in data['message']
+            with task_lock:
+                assert task_storage[data['task_id']]['ignore_cache'] is True
+            # 状态接口自身会获取 task_lock，不能在持锁时调用，否则同线程死锁
+            status = client.get(f"/api/status/{data['task_id']}").get_json()
+            assert status['ignore_cache'] is True
+        finally:
+            with task_lock:
+                task_storage.pop(data['task_id'], None)
+
     def test_query_defaults_to_unlimited_and_accepts_task_timeout(self, client, monkeypatch):
         monkeypatch.setattr('domain_checker.web.process_domains_async', lambda domains, task_id: None)
         resp = client.post('/api/query', json={'domains': 'example.com', 'query_timeout': 999})
@@ -177,11 +194,13 @@ class TestQueryValidation:
         data = resp.get_json()
         assert data['query_mode'] == 'unlimited'
         assert data['query_timeout'] == 120
+        assert data['ignore_cache'] is False
         try:
             with task_lock:
                 task = task_storage[data['task_id']]
                 assert task['query_mode'] == 'unlimited'
                 assert task['query_timeout'] == 120
+                assert task['ignore_cache'] is False
                 assert task['results'][0]['query_state'] == 'queued'
                 assert task['results'][0]['domain'] == 'example.com'
         finally:

@@ -25,7 +25,7 @@ Base URL：`http://localhost:5000`（或启动日志输出的地址）。所有�
   "retry_delay": 2,
   "timeout": 15,                  // WHOIS/RDAP/DNS/HTTP 单次网络请求超时，范围 1-120
   "max_workers": 5,               // 每个任务的并发线程数，范围 1-32
-  "reuse_recent_seconds": 600,    // 最近成功结果复用窗口（秒），0 表示关闭
+  "reuse_recent_seconds": 3600,   // 最近成功结果复用窗口（秒，默认 1 小时），0 表示关闭
   "proxy_enabled": false,
   "proxy_url": "http://127.0.0.1:7897",
   "platform": "rdap",             // rdap（默认）| whois | whoisxml
@@ -78,11 +78,11 @@ curl -X POST localhost:5000/api/config \
 ```jsonc
 // 请求：domains 为多行文本（支持 URL 混排，自动提取域名并去重）
 { "domains": "example.com\nhttps://www.qq.com/path", "platform": "rdap",
-  "query_mode": "unlimited", "query_timeout": 15 }
+  "query_mode": "unlimited", "query_timeout": 15, "ignore_cache": false }
 
 // 响应
 { "task_id": "0728111007366", "total": 2, "platform": "rdap",
-  "query_mode": "unlimited", "query_timeout": 15, "message": "任务已创建，..." }
+  "query_mode": "unlimited", "query_timeout": 15, "ignore_cache": false, "message": "任务已创建，..." }
 ```
 
 `query_mode` 可选 `unlimited`（默认，不添加主动等待）、`standard`（按配置限流）、`quick`
@@ -92,9 +92,10 @@ curl -X POST localhost:5000/api/config \
 重查使用的单次网络尝试超时，范围 1-120 秒，传递给 WHOIS、RDAP、DNS 和 HTTP 探测；省略时使用
 全局 `timeout`。它不是整批任务的总时限；非简略模式的失败重试和 DNS 自动复查会累加整体耗时。
 
-新任务会先查询 `reuse_recent_seconds` 窗口内最近一次成功且 DNS 有明确结论（`resolved` 为
-`true`/`false`）的历史结果并直接复用，命中项在结果中带 `reused=true`，且不再发起 RDAP/WHOIS/DNS
-请求。重查接口（`/api/retry`、`/api/retry-failed`）始终强制联网查询，不受复用影响。
+新任务会先查询 `reuse_recent_seconds` 窗口（默认 3600 秒）内最近一次成功且 DNS 有明确结论
+（`resolved` 为 `true`/`false`）的历史结果并直接复用，命中项在结果中带 `reused=true`，且不再
+发起 RDAP/WHOIS/DNS 请求。`ignore_cache=true` 时本任务跳过复用、全部重新联网查询；重查接口
+（`/api/retry`、`/api/retry-failed`）始终强制联网查询，不受复用影响。
 
 错误：`400` 无有效域名；`400` 超过 `max_domains_per_batch`。
 
@@ -103,7 +104,7 @@ curl -X POST localhost:5000/api/config \
 ```jsonc
 { "status": "processing|completed|cancelled", "total": 403, "completed": 120,
   "progress": 50.0, "paused": false,
-  "query_mode": "quick",
+  "query_mode": "quick", "ignore_cache": false,
   "operation": "query|retry|completed", "operation_total": 20, "operation_completed": 10,
   "elapsed_seconds": 12.34, "duration_seconds": null }
 ```
@@ -234,10 +235,12 @@ HTTP 探测及等待时间合计的完整流水线耗时，因此可以大于 `q
   "results": [ { "domain": "a.com", "status": "success", "resolved": 0,
                  "whois_status": "ok", "hold_status": null,
                  "query_time": "2026-07-28 12:00:01", "query_duration_seconds": 2.34,
+                 "reused": 0,
                  "block_reason": "未解析（NXDOMAIN）：..." } ] }
 ```
 
-注意 `resolved` 在 DB 中为 `1/0/null`。记录不存在返回 `404`。
+注意 `resolved` 在 DB 中为 `1/0/null`，`reused` 为 `1/0`；历史详情会保留复用来源，
+重新加载后仍可标注“复用最近结果”。记录不存在返回 `404`。
 
 ### DELETE /api/history/{task_id}
 

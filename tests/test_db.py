@@ -191,3 +191,14 @@ class TestRecentSuccessReuse:
         found = db.find_recent_success_results(['chain.com'], 600)
 
         assert found == {}
+
+    def test_reused_flag_survives_history_round_trip(self):
+        result = self._result('again.com')
+        result['reused'] = True
+        self._save('REUSE07', [result])
+
+        _, rows = db.get_history_detail('REUSE07')
+        assert rows[0]['reused'] == 1
+
+        found = db.find_recent_success_results(['again.com'], 600)
+        assert found['again.com']['reused'] is True

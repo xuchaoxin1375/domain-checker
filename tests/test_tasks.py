@@ -320,6 +320,37 @@ class TestResultReuse:
             with task_lock:
                 task_storage.pop('RETRYREUSE', None)
 
+    def test_ignore_cache_skips_reuse_lookup_and_logs(self, monkeypatch):
+        captured = {}
+        self._task('IGNORECACHE', ['cached.com'])
+        with task_lock:
+            task_storage['IGNORECACHE']['ignore_cache'] = True
+        lookup = mock.Mock(side_effect=AssertionError('忽略缓存时不得读取复用结果'))
+        monkeypatch.setattr('domain_checker.tasks.find_recent_success_results', lookup)
+
+        def fake_run_pool(domains, task_id, max_workers, **kwargs):
+            captured.update(kwargs)
+            with task_lock:
+                task_storage[task_id]['completed'] = len(domains)
+                task_storage[task_id]['operation_completed'] = len(domains)
+
+        monkeypatch.setattr('domain_checker.tasks._run_pool', fake_run_pool)
+        monkeypatch.setattr('domain_checker.tasks.save_history', lambda *args: None)
+        monkeypatch.setattr('domain_checker.tasks.save_results', lambda *args: None)
+        monkeypatch.setattr('domain_checker.tasks.update_history_counts', lambda *args: None)
+
+        try:
+            process_domains_async(['cached.com'], 'IGNORECACHE')
+
+            lookup.assert_not_called()
+            assert captured['reuse_map'] == {}
+            with task_lock:
+                logs = [log['message'] for log in task_storage['IGNORECACHE']['logs']]
+            assert any('忽略缓存' in message for message in logs)
+        finally:
+            with task_lock:
+                task_storage.pop('IGNORECACHE', None)
+
     def test_worker_forwards_cached_result(self, monkeypatch):
         cached = {'domain': 'forward.com', 'status': 'success'}
         seen = {}
@@ -460,3 +491,67 @@ def test_recent_success_result_is_reused_end_to_end(monkeypatch):
         with task_lock:
             task_storage.pop('REUSEJOB', None)
         db.delete_history(task_id)
+
+
+def test_completed_batch_is_reused_by_next_batch(monkeypatch):
+    """验证完整闭环：第一批联网完成后落库，第二批同域名直接复用历史结果。"""
+    domain = 'reuse-chain.com'
+    first_id, second_id = 'REUSECHAIN1', 'REUSECHAIN2'
+    now = '2026-08-01T10:00:00'
+
+    def add_task(task_id):
+        with task_lock:
+            task_storage[task_id] = {
+                'status': 'processing', 'total': 1, 'completed': 0,
+                'results': [create_queued_result(domain)], 'logs': [], 'refresh': False,
+                'created_at': now, 'completed_at': None, 'platform': 'rdap',
+                'operation': 'query', 'operation_total': 1, 'operation_completed': 0,
+                'operation_started_at': now, 'duration_seconds': None,
+            }
+
+    registration = mock.Mock(return_value={
+        'domain': domain, 'status': 'success', 'registrar': 'Chain Registrar',
+        'registration_date': '2020-01-01', 'expiration_date': '2030-01-01',
+        'updated_date': None, 'name_servers': 'ns1.chain.com', 'dnssec': 'unsigned',
+        'contact_email': None, 'whois_status': 'ok', 'hold_status': None,
+        'error': None, 'raw_response': 'raw',
+    })
+    dns_check = mock.Mock(return_value={
+        'resolved': True, 'block_reason': None, 'dns_records': ['1.2.3.4'],
+    })
+    monkeypatch.setitem(CONFIG, 'reuse_recent_seconds', 600)
+    monkeypatch.setattr('domain_checker.checker.query_registration_with_retry', registration)
+    monkeypatch.setattr('domain_checker.checker.check_domain_resolved', dns_check)
+
+    try:
+        add_task(first_id)
+        process_domains_async([domain], first_id)
+
+        assert registration.call_count == 1
+        with task_lock:
+            assert task_storage[first_id]['results'][0]['reused'] is False
+        # 关键前提：第一批结果确实写入了 SQLite（复用只读历史，不读内存任务）
+        _, rows = db.get_history_detail(first_id)
+        assert rows and rows[0]['status'] == 'success'
+
+        registration.side_effect = AssertionError('第二批命中复用后不得联网查询注册信息')
+        dns_check.side_effect = AssertionError('第二批命中复用后不得联网检查 DNS')
+        add_task(second_id)
+        process_domains_async([domain], second_id)
+
+        assert registration.call_count == 1
+        assert dns_check.call_count == 1
+        with task_lock:
+            second = task_storage[second_id]['results'][0]
+            assert second['reused'] is True
+            assert second['registrar'] == 'Chain Registrar'
+        _, rows = db.get_history_detail(second_id)
+        assert rows[0]['reused'] == 1
+    finally:
+        with task_lock:
+            task_storage.pop(first_id, None)
+            task_storage.pop(second_id, None)
+        task_pause_flags.pop(first_id, None)
+        task_pause_flags.pop(second_id, None)
+        db.delete_history(first_id)
+        db.delete_history(second_id)

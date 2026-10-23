@@ -43,7 +43,7 @@ CONFIG = {
     'retry_delay': 2,                 # 重试间隔(秒)
     'timeout': 15,                    # WHOIS/RDAP/DNS/HTTP 每次网络请求超时(秒)
     'max_workers': 5,                 # 每个任务的并发线程数（1-32）
-    'reuse_recent_seconds': 600,      # 最近成功结果的复用窗口(秒)，0 表示关闭
+    'reuse_recent_seconds': 3600,     # 最近成功结果的复用窗口(秒)，默认 1 小时；0 表示关闭
     'proxy_enabled': False,           # 是否启用代理
     'proxy_url': 'http://127.0.0.1:7897',  # 代理地址
     'proxy_auth': None,

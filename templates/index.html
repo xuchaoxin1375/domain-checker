@@ -187,6 +187,8 @@
         .query-mode-btn:hover, .result-display-btn:hover { color: var(--primary); }
         .query-mode-btn.active, .result-display-btn.active { background: var(--primary); color: #fff; font-weight: 700; }
         .query-mode-hint { color: var(--text-secondary); font-size: 11px; }
+        .query-cache-toggle { display: inline-flex; align-items: center; gap: 5px; color: var(--text-secondary); font-size: 12px; cursor: pointer; }
+        .query-cache-toggle input { width: 15px; height: 15px; cursor: pointer; accent-color: var(--primary); }
         .query-timeout-field { display: inline-flex; align-items: center; gap: 5px; color: var(--text-secondary); font-size: 12px; }
         .query-timeout-field input {
             width: 64px;
@@ -1196,11 +1198,12 @@
                     <div class="config-item"><label>并发:</label><input type="number" id="cfgWorkers" min="1" max="32" value="5" title="每个任务的并发线程上限（1-32）；修改后在下一个任务生效"></div>
                     <div class="config-item"><label>默认单次超时(秒):</label><input type="number" id="cfgTimeout" min="1" max="120" value="15" onchange="syncQueryTimeoutFromDefault()" title="每次 WHOIS、RDAP、DNS 或 HTTP 请求的超时；重试会累计总耗时"></div>
                     <div class="config-item"><label>单批上限:</label><input type="number" id="cfgMaxBatch" min="10" max="1000" value="500"></div>
-                    <div class="config-item"><label>结果复用(秒):</label><input type="number" id="cfgReuse" min="0" max="86400" step="30" value="600" title="复用该窗口内最近一次成功且 DNS 有结论的结果；0 表示关闭"></div>
+                    <div class="config-item"><label>结果复用(秒):</label><input type="number" id="cfgReuse" min="0" max="86400" step="60" value="3600" title="默认复用 1 小时内最近一次成功且 DNS 有结论的结果；0 表示关闭"></div>
                 </div>
                 <div class="config-note">
                     并发是<strong>每个任务</strong>的线程池上限，任务开始后修改配置只影响后续任务；多个任务同时运行会各自占用线程。
-                    结果复用只复用窗口内「查询成功且 DNS 有结论」的记录，命中后跳过网络查询；点「重查」始终强制联网。
+                    结果复用只复用窗口内「查询成功且 DNS 有结论」的记录（默认 1 小时），命中后跳过网络查询；
+                    查询区勾选「忽略缓存」可让本次任务全部联网；点「重查」始终强制联网。
                 </div>
                 
                 <!-- 平台选择 -->
@@ -1266,6 +1269,10 @@
                     <label class="query-timeout-field" for="queryTimeout" title="每次网络请求的超时；WHOIS 重试、RDAP 回退、DNS 复查和 HTTP 探测会累计总耗时">单次请求超时
                         <input type="number" id="queryTimeout" min="1" max="120" value="15">秒
                     </label>
+                    <label class="query-cache-toggle" for="ignoreCache" title="默认复用 1 小时内查询成功且 DNS 有结论的结果；勾选后本任务全部重新联网查询">
+                        <input type="checkbox" id="ignoreCache"> 忽略缓存
+                    </label>
+                    <span class="query-mode-hint" id="cacheHint">默认复用 1 小时内成功结果</span>
                     <span class="query-mode-hint">每次网络请求；重试会累计总耗时</span>
                     <span class="query-mode-hint" id="queryModeHint">不添加主动请求间隔</span>
                 </div>
@@ -1998,6 +2005,7 @@ https://www.example.com/path/to/page"></textarea>
                         platform: currentPlatform,
                         query_mode: currentQueryMode,
                         query_timeout: queryTimeoutValue(),
+                        ignore_cache: document.getElementById('ignoreCache').checked,
                     })
                 });
                 const data = await resp.json();
@@ -2029,6 +2037,7 @@ https://www.example.com/path/to/page"></textarea>
                     queryMode: currentQueryMode,
                     platform: currentPlatform,
                     queryTimeout: queryTimeoutValue(),
+                    ignoreCache: Boolean(document.getElementById('ignoreCache')?.checked),
                     savedAt: Date.now(),
                 }));
             } catch (error) { /* localStorage 不可用时不影响查询 */ }
@@ -2075,6 +2084,8 @@ https://www.example.com/path/to/page"></textarea>
                 setQueryMode(currentQueryMode);
                 if (saved.platform) setPlatform(saved.platform);
                 if (saved.queryTimeout) document.getElementById('queryTimeout').value = saved.queryTimeout;
+                const ignoreCache = status.ignore_cache ?? saved.ignoreCache;
+                if (ignoreCache !== undefined) document.getElementById('ignoreCache').checked = Boolean(ignoreCache);
                 isPaused = Boolean(status.paused);
                 updatePauseButton();
 
@@ -2979,7 +2990,8 @@ https://www.example.com/path/to/page"></textarea>
                     block_reason: r.block_reason,
                     dns_records: r.dns_records ? r.dns_records.split(',') : [],
                     error: r.error, raw_response: r.raw_response, query_time: r.query_time,
-                    query_duration_seconds: r.query_duration_seconds
+                    query_duration_seconds: r.query_duration_seconds,
+                    reused: Boolean(r.reused)
                 }));
                 
                 // 加载历史结果到查询页表格

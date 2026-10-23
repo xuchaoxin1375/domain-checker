@@ -255,6 +255,7 @@ def process_domains_async(domains: list, task_id: str):
         task = task_storage[task_id]
         query_mode = normalize_query_mode(task.get('query_mode', 'unlimited'))
         query_timeout = normalize_timeout(task.get('query_timeout', default_timeout))
+        ignore_cache = bool(task.get('ignore_cache', False))
     cfg = _worker_config(query_mode, query_timeout)
     # 保留用户在后台线程真正启动前已经发出的暂停请求。
     task_pause_flags.setdefault(task_id, False)
@@ -267,8 +268,14 @@ def process_domains_async(domains: list, task_id: str):
         f"查询参数：超时 {cfg['timeout']} 秒，最多尝试 {cfg['max_retries']} 次，请求间隔 {cfg['rate_limit_delay']:.1f} 秒，失败重试等待 {cfg['retry_delay']:.1f} 秒",
     )
 
-    reuse_map = _reusable_results(domains)
-    if reuse_map:
+    reuse_map = {} if ignore_cache else _reusable_results(domains)
+    if ignore_cache:
+        append_task_log(
+            task_id,
+            'info',
+            '已勾选忽略缓存：本任务不使用最近成功结果，全部域名重新联网查询',
+        )
+    elif reuse_map:
         with config_lock:
             reuse_ttl = CONFIG.get('reuse_recent_seconds', 0)
         append_task_log(

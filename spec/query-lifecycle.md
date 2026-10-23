@@ -46,8 +46,9 @@
 - 默认不限流模式不添加主动等待，标准/快速模式只调整限流和重试等待；`rate_limit_delay` 同时作用于
   RDAP（默认平台）与 WHOIS。简略快速模式最多一次 WHOIS 尝试和一次 DNS 查询，并跳过 HTTP 探测与
   DNS 自动复查；它只减少网络步骤，不放宽确定性判断语义。`query_timeout` 可按任务覆盖全局超时。
-- 新任务按 `reuse_recent_seconds`（0 关闭）复用窗口内 `status=success` 且 DNS 有结论的最新结果，
-  命中项标记 `reused=true` 并跳过网络查询；新鲜度按原始 `query_time` 计算。重查始终强制联网。
+- 新任务按 `reuse_recent_seconds`（默认 3600 秒，0 关闭）复用窗口内 `status=success` 且 DNS 有结论的
+  最新结果，命中项标记 `reused=true` 并跳过网络查询；新鲜度按原始 `query_time` 计算，复用标记随结果
+  写入历史。查询请求可带 `ignore_cache=true` 跳过复用；重查始终强制联网。
 - 数值配置在 API 与 `settings.json` 加载时统一归一化：超范围收敛到边界，非法值忽略或返回 `400`，
   不能让任务线程因配置异常退出。
 - 访问 `task_storage` 持 `task_lock`，访问 `CONFIG` 持 `config_lock`，锁内不执行数据库 IO。

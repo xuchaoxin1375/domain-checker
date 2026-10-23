@@ -66,6 +66,7 @@ def init_db():
             raw_response TEXT,
             query_time TEXT,
             query_duration_seconds REAL,
+            reused INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
             FOREIGN KEY (task_id) REFERENCES query_history(task_id)
         )
@@ -81,6 +82,7 @@ def init_db():
         'query_duration_seconds': 'REAL',
         'raw_response': 'TEXT',
         'contact_email': 'TEXT',
+        'reused': 'INTEGER DEFAULT 0',
     }.items():
         if column not in existing_columns:
             cursor.execute(f'ALTER TABLE query_results ADD COLUMN {column} {definition}')
@@ -176,8 +178,8 @@ def save_results(task_id: str, results: list):
             INSERT INTO query_results
             (task_id, domain, status, whois_status, hold_status, registrar, contact_email, registration_date,
              expiration_date, updated_date, name_servers, dnssec, resolved, block_reason,
-             dns_records, error, raw_response, query_time, query_duration_seconds, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             dns_records, error, raw_response, query_time, query_duration_seconds, reused, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             task_id, r.get('domain', ''), r.get('status', ''), r.get('whois_status', ''),
             r.get('hold_status', ''), r.get('registrar', ''),
@@ -187,6 +189,7 @@ def save_results(task_id: str, results: list):
             1 if r.get('resolved') is True else (0 if r.get('resolved') is False else None),
             r.get('block_reason', ''), dns_records, r.get('error', ''), r.get('raw_response'),
             r.get('query_time', ''), r.get('query_duration_seconds'),
+            1 if r.get('reused') else 0,
             datetime.now().isoformat()
         ))
 
@@ -251,6 +254,8 @@ def _result_row_to_dict(row: sqlite3.Row) -> dict:
     result['resolved'] = (
         True if resolved == 1 else False if resolved == 0 else None
     )
+    # 复用来源需要跨历史持久化，前端据此标注“复用最近结果”
+    result['reused'] = bool(result.get('reused'))
     records = result.get('dns_records')
     result['dns_records'] = records.split(',') if records else []
     for db_only in ('id', 'task_id', 'created_at'):

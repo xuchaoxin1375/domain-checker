@@ -99,6 +99,7 @@ def _restore_task_from_history(task_id: str) -> bool:
         'operation': 'completed',
         'query_mode': 'unlimited',
         'query_timeout': normalize_timeout(saved_config.get('timeout', CONFIG['timeout'])),
+        'ignore_cache': False,
         'operation_total': 0,
         'operation_completed': 0,
         'operation_started_at': completed_at,
@@ -191,6 +192,7 @@ def _register_routes(flask_app: Flask):
         input_text = data.get('domains', '')
         platform = data.get('platform', 'rdap')
         query_mode = normalize_query_mode(data.get('query_mode', data.get('mode', 'unlimited')))
+        ignore_cache = bool(data.get('ignore_cache', False))
         with config_lock:
             query_timeout = normalize_timeout(data.get('query_timeout', CONFIG['timeout']))
 
@@ -220,6 +222,7 @@ def _register_routes(flask_app: Flask):
                 'platform': platform, 'operation': 'query',
                 'query_mode': query_mode,
                 'query_timeout': query_timeout,
+                'ignore_cache': ignore_cache,
                 'operation_total': len(domains), 'operation_completed': 0,
                 'operation_started_at': datetime.now().isoformat(),
                 'duration_seconds': None,
@@ -237,7 +240,11 @@ def _register_routes(flask_app: Flask):
             'task_id': task_id, 'total': len(domains), 'platform': platform,
             'query_mode': query_mode,
             'query_timeout': query_timeout,
-            'message': f'任务已创建，使用{PLATFORMS.get(platform, {}).get("name", platform)}处理 {len(domains)} 个域名'
+            'ignore_cache': ignore_cache,
+            'message': (
+                f'任务已创建，使用{PLATFORMS.get(platform, {}).get("name", platform)}处理 {len(domains)} 个域名'
+                + ('；已忽略缓存，将全部联网查询' if ignore_cache else '')
+            )
         })
 
     @flask_app.route('/api/status/<task_id>')
@@ -265,6 +272,7 @@ def _register_routes(flask_app: Flask):
             'paused': task_pause_flags.get(task_id, False),
             'query_mode': task.get('query_mode', 'unlimited'),
             'query_timeout': task.get('query_timeout'),
+            'ignore_cache': task.get('ignore_cache', False),
             'operation': operation,
             'operation_total': operation_total,
             'operation_completed': operation_completed,
