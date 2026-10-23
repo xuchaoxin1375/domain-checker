@@ -10,6 +10,8 @@ from domain_checker.settings import CONFIG
 from domain_checker.state import task_lock, task_pause_flags, task_storage, wait_for_task_resume
 from domain_checker.tasks import (
     _complete_operation,
+    _needs_persistent_retry,
+    _persistent_timeout,
     _process_domain_worker,
     _run_pool,
     _worker_config,
@@ -641,3 +643,249 @@ def test_cancelled_inflight_failure_does_not_overwrite_saved_success(monkeypatch
             task_storage.pop(task_id, None)
         task_pause_flags.pop(task_id, None)
         db.delete_history(task_id)
+
+
+def test_persistent_helpers_classify_retryable_results_and_relax_timeout():
+    assert _needs_persistent_retry({'status': 'failed'})
+    assert _needs_persistent_retry({'status': 'timeout'})
+    assert _needs_persistent_retry({'status': 'success', 'resolved': None})
+    assert not _needs_persistent_retry({'status': 'success', 'resolved': True})
+    assert not _needs_persistent_retry({'status': 'success', 'resolved': False})
+    assert not _needs_persistent_retry({'status': 'not_registered', 'resolved': None})
+    assert not _needs_persistent_retry({'status': 'invalid'})
+
+    assert _persistent_timeout(10, 1) == 10
+    assert _persistent_timeout(10, 2) == 20
+    assert _persistent_timeout(10, 3) == 40
+    assert _persistent_timeout(15, 6) == 120
+
+
+def _persistent_task(task_id, results, max_rounds=3, timeout=10, operation='query'):
+    now = '2026-08-01T10:00:00'
+    with task_lock:
+        task_storage[task_id] = {
+            'status': 'processing', 'total': len(results), 'completed': len(results),
+            'results': [dict(result) for result in results], 'logs': [], 'refresh': False,
+            'created_at': now, 'completed_at': None, 'platform': 'rdap',
+            'query_mode': 'unlimited', 'query_timeout': timeout,
+            'persistent': True, 'persistent_max_rounds': max_rounds,
+            'persistent_round': 1, 'persistent_retrying': 0,
+            'operation': operation, 'operation_total': len(results),
+            'operation_completed': len(results), 'operation_started_at': now,
+            'duration_seconds': None,
+        }
+
+
+def _persistent_pool(calls, outcomes, cancel_on_call=None):
+    """模拟线程池：按轮次写入结果，并像 checker 一样维护完成计数。"""
+    def fake_run_pool(domains, task_id, max_workers, track_operation=False,
+                      query_mode='unlimited', query_timeout=None, platform='rdap',
+                      reuse_map=None):
+        calls.append({
+            'domains': list(domains),
+            'timeout': query_timeout,
+            'track_operation': track_operation,
+        })
+        outcome = outcomes.pop(0) if outcomes else {}
+        with task_lock:
+            task = task_storage[task_id]
+            if cancel_on_call == len(calls):
+                task['status'] = 'cancelled'
+                return
+            for result in task['results']:
+                if result['domain'] not in domains:
+                    continue
+                if (task.get('operation') == 'query'
+                        and result.get('query_state') != 'completed'):
+                    task['completed'] += 1
+                result.update(outcome.get(result['domain'], {}))
+                result['query_state'] = 'completed'
+    return fake_run_pool
+
+
+def test_persistent_mode_retries_failed_and_unknown_domains(monkeypatch):
+    results = [
+        {'domain': 'ok.com', 'status': 'success', 'resolved': True, 'query_state': 'completed'},
+        {'domain': 'slow.com', 'status': 'timeout', 'resolved': None, 'query_state': 'completed'},
+        {'domain': 'gone.com', 'status': 'not_registered', 'resolved': None, 'query_state': 'completed'},
+        {'domain': 'bad.com', 'status': 'invalid', 'resolved': None, 'query_state': 'completed'},
+        {'domain': 'dns.com', 'status': 'success', 'resolved': None, 'query_state': 'completed'},
+    ]
+    _persistent_task('PERSIST1', results, max_rounds=4, timeout=10)
+    calls = []
+    monkeypatch.setattr(
+        'domain_checker.tasks._run_pool',
+        _persistent_pool(calls, [
+            {},
+            {'slow.com': {'status': 'success', 'resolved': True},
+             'dns.com': {'status': 'success', 'resolved': True}},
+        ]),
+    )
+    monkeypatch.setattr('domain_checker.tasks.save_history', lambda *args: None)
+    monkeypatch.setattr('domain_checker.tasks.save_results', lambda *args: None)
+    monkeypatch.setattr('domain_checker.tasks.update_history_counts', lambda *args: None)
+
+    try:
+        process_domains_async([result['domain'] for result in results], 'PERSIST1')
+
+        # 首轮全量（含确定性结论与无效域名）；后续只重试超时/失败/解析未知
+        assert [call['domains'] for call in calls] == [
+            ['ok.com', 'slow.com', 'gone.com', 'bad.com', 'dns.com'],
+            ['slow.com', 'dns.com'],
+        ]
+        assert [call['timeout'] for call in calls] == [10, 20]
+        assert [call['track_operation'] for call in calls] == [True, False]
+
+        with task_lock:
+            task = task_storage['PERSIST1']
+            assert task['status'] == 'completed'
+            assert task['persistent_round'] == 2
+            assert task['persistent_retrying'] == 0
+            assert task['completed'] == 5
+        assert any('执着模式第 2/4 轮' in log['message'] for log in task['logs'])
+    finally:
+        with task_lock:
+            task_storage.pop('PERSIST1', None)
+
+
+def test_persistent_mode_stops_at_round_limit_and_warns(monkeypatch):
+    results = [
+        {'domain': 'never.com', 'status': 'timeout', 'resolved': None, 'query_state': 'completed'},
+    ]
+    _persistent_task('PERSIST2', results, max_rounds=3, timeout=10)
+    calls = []
+    monkeypatch.setattr('domain_checker.tasks._run_pool', _persistent_pool(calls, []))
+    monkeypatch.setattr('domain_checker.tasks.save_history', lambda *args: None)
+    monkeypatch.setattr('domain_checker.tasks.save_results', lambda *args: None)
+    monkeypatch.setattr('domain_checker.tasks.update_history_counts', lambda *args: None)
+
+    try:
+        process_domains_async(['never.com'], 'PERSIST2')
+
+        assert [call['timeout'] for call in calls] == [10, 20, 40]
+        with task_lock:
+            task = task_storage['PERSIST2']
+            assert task['status'] == 'completed'
+            assert task['persistent_round'] == 3
+            assert task['persistent_retrying'] == 0
+        assert any('执着模式已达 3 轮上限' in log['message'] for log in task['logs'])
+    finally:
+        with task_lock:
+            task_storage.pop('PERSIST2', None)
+
+
+def test_persistent_mode_stops_when_task_is_cancelled(monkeypatch):
+    results = [
+        {'domain': 'cancel.com', 'status': 'failed', 'resolved': None, 'query_state': 'completed'},
+    ]
+    _persistent_task('PERSIST3', results, max_rounds=5, timeout=10)
+    calls = []
+    monkeypatch.setattr(
+        'domain_checker.tasks._run_pool',
+        _persistent_pool(calls, [{}], cancel_on_call=1),
+    )
+    monkeypatch.setattr('domain_checker.tasks.save_history', lambda *args: None)
+    monkeypatch.setattr('domain_checker.tasks.save_results', lambda *args: None)
+    monkeypatch.setattr('domain_checker.tasks.update_history_counts', lambda *args: None)
+    monkeypatch.setattr('domain_checker.tasks.finalize_cancelled_history', lambda *args: None)
+
+    try:
+        process_domains_async(['cancel.com'], 'PERSIST3')
+
+        assert len(calls) == 1
+        with task_lock:
+            assert task_storage['PERSIST3']['status'] == 'cancelled'
+    finally:
+        with task_lock:
+            task_storage.pop('PERSIST3', None)
+        task_pause_flags.pop('PERSIST3', None)
+
+
+def test_persistent_mode_passes_relaxed_timeout_to_real_workers(monkeypatch):
+    domain = 'escalate.com'
+    task_id = 'PERSIST5'
+    now = '2026-08-01T10:00:00'
+    with task_lock:
+        task_storage[task_id] = {
+            'status': 'processing', 'total': 1, 'completed': 0,
+            'results': [create_queued_result(domain)], 'logs': [], 'refresh': False,
+            'created_at': now, 'completed_at': None, 'platform': 'rdap',
+            'query_mode': 'unlimited', 'query_timeout': 8,
+            'persistent': True, 'persistent_max_rounds': 3,
+            'persistent_round': 1, 'persistent_retrying': 0,
+            'operation': 'query', 'operation_total': 1, 'operation_completed': 0,
+            'operation_started_at': now, 'duration_seconds': None,
+        }
+
+    attempts = []
+
+    def fake_process(domain, task_id=None, query_mode='unlimited', query_timeout=None,
+                     platform=None, cached_result=None):
+        attempts.append(query_timeout)
+        success = len(attempts) >= 3
+        result = {
+            'domain': domain,
+            'status': 'success' if success else 'timeout',
+            'resolved': True if success else None,
+            'error': None if success else 'WHOIS 查询超时',
+            'query_state': 'completed',
+            'query_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'query_duration_seconds': 0.01,
+        }
+        with task_lock:
+            task = task_storage[task_id]
+            for index, existing in enumerate(task['results']):
+                if existing['domain'] != domain:
+                    continue
+                if task.get('operation') == 'query' and existing.get('query_state') != 'completed':
+                    task['completed'] += 1
+                task['results'][index] = result
+                break
+        return result
+
+    monkeypatch.setattr('domain_checker.tasks.process_single_domain', fake_process)
+    monkeypatch.setattr('domain_checker.tasks.save_history', lambda *args: None)
+    monkeypatch.setattr('domain_checker.tasks.save_result', lambda *args: None)
+    monkeypatch.setattr('domain_checker.tasks.save_results', lambda *args: None)
+    monkeypatch.setattr('domain_checker.tasks.update_history_counts', lambda *args: None)
+
+    try:
+        process_domains_async([domain], task_id)
+
+        assert attempts == [8, 16, 32]
+        with task_lock:
+            task = task_storage[task_id]
+            assert task['status'] == 'completed'
+            assert task['completed'] == 1
+            assert task['results'][0]['status'] == 'success'
+    finally:
+        with task_lock:
+            task_storage.pop(task_id, None)
+        task_pause_flags.pop(task_id, None)
+
+
+def test_retry_domains_applies_persistent_rounds(monkeypatch):
+    results = [
+        {'domain': 'retry.com', 'status': 'failed', 'resolved': None, 'query_state': 'queued'},
+    ]
+    _persistent_task('PERSIST4', results, max_rounds=3, timeout=10, operation='retry')
+    calls = []
+    monkeypatch.setattr(
+        'domain_checker.tasks._run_pool',
+        _persistent_pool(calls, [{}, {'retry.com': {'status': 'success', 'resolved': True}}]),
+    )
+    monkeypatch.setattr('domain_checker.tasks.save_results', lambda *args: None)
+    monkeypatch.setattr('domain_checker.tasks.update_history_counts', lambda *args: None)
+
+    try:
+        retry_domains_async(['retry.com'], 'PERSIST4')
+
+        assert [call['timeout'] for call in calls] == [10, 20]
+        with task_lock:
+            task = task_storage['PERSIST4']
+            assert task['status'] == 'completed'
+            assert task['results'][0]['status'] == 'success'
+    finally:
+        with task_lock:
+            task_storage.pop('PERSIST4', None)
+        task_pause_flags.pop('PERSIST4', None)

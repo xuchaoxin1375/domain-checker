@@ -4,6 +4,9 @@
 
 - 前端为单文件 `templates/index.html`，原生 HTML/CSS/JS，无构建步骤。
 - 中文界面；API 字段与后端保持兼容。Tab 通过 `data-tab` 定位，不依赖浏览器全局 `event`。
+- 查询区提供“执着模式”开关：勾选后任务请求带 `persistent=true`，开关偏好保存在本地；
+  失败或超时的域名会自动重试，单次超时逐轮放宽，轮数上限取配置项 `persistent_max_rounds`。
+  状态接口返回 `persistent_round` / `persistent_retrying` 时，进度区显示“执着模式第 N/M 轮，重试 X 个域名”。
 - 域名默认点击打开 `https://域名`；重查、详细结果、复制三个行内操作集中在表格最右侧固定的“操作”列，
   以图标按钮呈现并保留 `title` 与 `aria-label`。
 - 状态筛选与解析筛选互相独立；`not_registered` 是状态值，在解析筛选中为“不适用”。

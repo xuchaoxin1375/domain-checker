@@ -85,6 +85,20 @@ def _worker_config(query_mode: str = 'unlimited', query_timeout: int | None = No
     return cfg
 
 
+def _persistent_timeout(base_timeout: int, round_index: int) -> int:
+    """执着模式逐轮放宽单次请求超时：第 2 轮翻倍，之后继续翻倍并封顶。"""
+    factor = 2 ** max(0, int(round_index) - 1)
+    return normalize_timeout(int(base_timeout) * factor)
+
+
+def _needs_persistent_retry(result: dict) -> bool:
+    """执着模式仍需重试的结果：查询失败/超时，或注册成功但解析状态未知。"""
+    status = result.get('status')
+    if status in {'failed', 'timeout'}:
+        return True
+    return status == 'success' and result.get('resolved') is None
+
+
 def _reusable_results(domains: list[str]) -> dict[str, dict]:
     """读取复用窗口内的最近成功结果；缓存读取失败不影响正常查询。"""
     with config_lock:
@@ -233,6 +247,65 @@ def _run_pool(domains: list[str], task_id: str, max_workers: int,
         thread.join()
 
 
+def _run_persistent_rounds(task_id: str, max_workers: int, query_mode: str,
+                           base_timeout: int, platform: str, max_rounds: int) -> None:
+    """执着模式：把失败/超时域名自动重新入队，直到得到结论或达到轮数上限。
+
+    每轮把单次请求超时放宽一倍（封顶由 ``normalize_timeout`` 控制），
+    并通过 ``persistent_round``/``persistent_retrying`` 向前端暴露当前轮次。
+    """
+    max_rounds = max(1, int(max_rounds))
+    round_index = 1
+    while round_index < max_rounds:
+        with task_lock:
+            task = task_storage.get(task_id)
+            if not task or task['status'] == 'cancelled' or not task.get('persistent'):
+                return
+            candidates = [r['domain'] for r in task['results'] if _needs_persistent_retry(r)]
+            if not candidates:
+                task['persistent_retrying'] = 0
+                return
+            round_index += 1
+            timeout = _persistent_timeout(base_timeout, round_index)
+            task['persistent_round'] = round_index
+            task['persistent_retrying'] = len(candidates)
+            task['refresh'] = True
+            candidate_set = set(candidates)
+            for result in task['results']:
+                if result['domain'] not in candidate_set:
+                    continue
+                # 初次查询按完成数推进进度；重开这些行时同步回退，避免完成数超过总数
+                if task.get('operation') == 'query' and result.get('query_state') == 'completed':
+                    task['completed'] = max(0, task.get('completed', 0) - 1)
+                result['query_state'] = 'queued'
+                result['query_time'] = None
+                result['query_duration_seconds'] = None
+
+        append_task_log(
+            task_id,
+            'info',
+            f"执着模式第 {round_index}/{max_rounds} 轮：重试 {len(candidates)} 个失败、超时或解析未知域名，"
+            f"单次超时放宽至 {timeout} 秒",
+        )
+        _run_pool(
+            candidates, task_id, max_workers, track_operation=False,
+            query_mode=query_mode, query_timeout=timeout, platform=platform,
+        )
+
+    with task_lock:
+        task = task_storage.get(task_id)
+        if not task or task['status'] == 'cancelled':
+            return
+        task['persistent_retrying'] = 0
+        remaining = sum(1 for result in task['results'] if _needs_persistent_retry(result))
+    if remaining:
+        append_task_log(
+            task_id,
+            'warn',
+            f"执着模式已达 {max_rounds} 轮上限，仍有 {remaining} 个域名未得到结论",
+        )
+
+
 def _complete_operation(task_id: str, started: float, label: str, work_count: int) -> tuple[list, int, int] | None:
     raw_duration = time.perf_counter() - started
     with task_lock:
@@ -279,11 +352,14 @@ def process_domains_async(domains: list, task_id: str):
     total = len(domains)
     with config_lock:
         default_timeout = CONFIG['timeout']
+    persistent_default_rounds = _config_int('persistent_max_rounds', 5)
     with task_lock:
         task = task_storage[task_id]
         query_mode = normalize_query_mode(task.get('query_mode', 'unlimited'))
         query_timeout = normalize_timeout(task.get('query_timeout', default_timeout))
         ignore_cache = bool(task.get('ignore_cache', False))
+        persistent = bool(task.get('persistent', False))
+        persistent_max_rounds = int(task.get('persistent_max_rounds') or persistent_default_rounds)
     cfg = _worker_config(query_mode, query_timeout)
     # 保留用户在后台线程真正启动前已经发出的暂停请求。
     task_pause_flags.setdefault(task_id, False)
@@ -295,6 +371,12 @@ def process_domains_async(domains: list, task_id: str):
         'info',
         f"查询参数：超时 {cfg['timeout']} 秒，最多尝试 {cfg['max_retries']} 次，请求间隔 {cfg['rate_limit_delay']:.1f} 秒，失败重试等待 {cfg['retry_delay']:.1f} 秒",
     )
+    if persistent:
+        append_task_log(
+            task_id,
+            'info',
+            f"已开启执着模式：失败/超时/解析未知域名自动重试，最多 {persistent_max_rounds} 轮，单次超时逐轮放宽",
+        )
 
     reuse_map = {} if ignore_cache else _reusable_results(domains)
     if ignore_cache:
@@ -327,6 +409,11 @@ def process_domains_async(domains: list, task_id: str):
         query_mode=query_mode, query_timeout=query_timeout,
         platform=platform, reuse_map=reuse_map,
     )
+    if persistent:
+        _run_persistent_rounds(
+            task_id, cfg['max_workers'], query_mode, query_timeout, platform,
+            persistent_max_rounds,
+        )
 
     completed = _complete_operation(task_id, started, '查询', len(domains))
     if completed is None:
@@ -343,11 +430,14 @@ def retry_domains_async(domains: list[str], task_id: str) -> None:
     started = time.perf_counter()
     with config_lock:
         default_timeout = CONFIG['timeout']
+    persistent_default_rounds = _config_int('persistent_max_rounds', 5)
     with task_lock:
         task = task_storage.get(task_id, {})
         query_mode = normalize_query_mode(task.get('query_mode', 'unlimited'))
         query_timeout = normalize_timeout(task.get('query_timeout', default_timeout))
         platform = task.get('platform', 'rdap')
+        persistent = bool(task.get('persistent', False))
+        persistent_max_rounds = int(task.get('persistent_max_rounds') or persistent_default_rounds)
     cfg = _worker_config(query_mode, query_timeout)
     task_pause_flags.setdefault(task_id, False)
     append_task_log(task_id, 'info', f"开始重新查询 {len(domains)} 个域名，并发线程 {cfg['max_workers']}，{QUERY_MODES[query_mode]['name']}")
@@ -356,6 +446,11 @@ def retry_domains_async(domains: list[str], task_id: str) -> None:
         query_mode=query_mode, query_timeout=query_timeout,
         platform=platform,
     )
+    if persistent:
+        _run_persistent_rounds(
+            task_id, cfg['max_workers'], query_mode, query_timeout, platform,
+            persistent_max_rounds,
+        )
 
     completed = _complete_operation(task_id, started, '重新查询', len(domains))
     if completed is None:

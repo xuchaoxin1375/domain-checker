@@ -85,6 +85,10 @@ flowchart TD
 - 重查（retry/retry-failed）：任务重新进入 `processing`，使用同一受控线程池按"同域名覆盖、
   否则追加"更新结果，并记录独立的操作进度与耗时；任务不在内存时先从 SQLite 历史恢复
 - `retry-failed` 同时包含查询失败/超时/无效结果，以及注册数据查询成功但 `resolved=None` 的 DNS 未知结果
+- 执着模式（任务级 `persistent`）：首轮结束后按同一线程池追加轮次，只重试失败、超时和 DNS 未知结果；
+  第 `n` 轮超时按 `基础超时 × 2^(n-1)` 放宽并封顶 120 秒，达到 `persistent_max_rounds`
+  （含首轮）后记录告警并保留最后一轮结果。追加轮次不推进 `operation_completed`，但会回退/恢复
+  `completed` 计数；状态接口通过 `persistent_round` / `persistent_retrying` 暴露重试进度
 
 ### 查询结果状态判定
 

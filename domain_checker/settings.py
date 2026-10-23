@@ -44,6 +44,7 @@ CONFIG = {
     'timeout': 15,                    # WHOIS/RDAP/DNS/HTTP 每次网络请求超时(秒)
     'max_workers': 5,                 # 每个任务的并发线程数（1-32）
     'reuse_recent_seconds': 3600,     # 最近成功结果的复用窗口(秒)，默认 1 小时；0 表示关闭
+    'persistent_max_rounds': 5,       # 执着模式最多查询轮数（含首轮，失败/超时域名自动重试）
     'proxy_enabled': False,           # 是否启用代理
     'proxy_url': 'http://127.0.0.1:7897',  # 代理地址
     'proxy_auth': None,
@@ -66,6 +67,7 @@ CONFIG_LIMITS = {
     'timeout': (TIMEOUT_MIN_SECONDS, TIMEOUT_MAX_SECONDS),
     'max_workers': (1, 32),
     'reuse_recent_seconds': (0, 86400),
+    'persistent_max_rounds': (1, 20),
 }
 
 

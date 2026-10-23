@@ -440,6 +440,26 @@ def test_result_actions_are_pinned_in_last_column_as_icon_buttons(client):
     assert "button.innerHTML = ACTION_ICONS.check;" in html
 
 
+def test_persistent_mode_toggle_and_payload(client):
+    html = client.get('/').get_data(as_text=True)
+
+    assert 'id="persistentMode"' in html
+    assert '> 执着模式' in html
+    assert 'id="persistentHint"' in html
+    assert 'function persistentModeEnabled()' in html
+    assert 'function setPersistentMode(enabled, persist = true)' in html
+    assert 'domainCheckerPersistentMode' in html
+    assert 'function persistentPayload()' in html
+    assert '...persistentPayload()' in html
+    assert 'persistent: persistentModeEnabled(),' in html
+    assert 'const persistentInfo = status.persistent ? {' in html
+    assert 'status.persistent_retrying' in html
+    assert '执着模式第' in html
+    assert 'id="cfgPersistentRounds"' in html
+    assert 'persistent_max_rounds: parseInt' in html
+    assert "document.getElementById('cfgPersistentRounds').value = config.persistent_max_rounds || 5;" in html
+
+
 def test_pause_stops_log_polling_and_refresh_restores_task(client):
     html = client.get('/').get_data(as_text=True)
 

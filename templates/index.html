@@ -1219,11 +1219,13 @@
                     <div class="config-item"><label>默认单次超时(秒):</label><input type="number" id="cfgTimeout" min="1" max="120" value="15" onchange="syncQueryTimeoutFromDefault()" title="每次 WHOIS、RDAP、DNS 或 HTTP 请求的超时；重试会累计总耗时"></div>
                     <div class="config-item"><label>单批上限:</label><input type="number" id="cfgMaxBatch" min="10" max="1000" value="500"></div>
                     <div class="config-item"><label>结果复用(秒):</label><input type="number" id="cfgReuse" min="0" max="86400" step="60" value="3600" title="默认复用 1 小时内最近一次成功且 DNS 有结论的结果；0 表示关闭"></div>
+                    <div class="config-item"><label>执着轮数:</label><input type="number" id="cfgPersistentRounds" min="1" max="20" value="5" title="执着模式最多查询轮数（含首轮）；失败、超时或解析未知的域名自动重试，单次超时逐轮放宽"></div>
                 </div>
                 <div class="config-note">
                     并发是<strong>每个任务</strong>的线程池上限，任务开始后修改配置只影响后续任务；多个任务同时运行会各自占用线程。
                     结果复用只复用窗口内「查询成功且 DNS 有结论」的记录（默认 1 小时），命中后跳过网络查询；
                     查询区勾选「忽略缓存」可让本次任务全部联网；点「重查」始终强制联网。
+                    执着模式按轮重试失败、超时或解析未知的域名，单次请求超时逐轮放宽（最长 120 秒），轮数上限包含首次查询。
                 </div>
                 
                 <!-- 平台选择 -->
@@ -1292,6 +1294,10 @@
                     <label class="query-cache-toggle" for="ignoreCache" title="默认复用 1 小时内查询成功且 DNS 有结论的结果；勾选后本任务全部重新联网查询">
                         <input type="checkbox" id="ignoreCache"> 忽略缓存
                     </label>
+                    <label class="query-cache-toggle" for="persistentMode" title="开启后，查询失败、超时或解析状态未知的域名会自动重新查询；每轮把单次请求超时放宽一倍（最长 120 秒），直到得到结论或达到轮数上限">
+                        <input type="checkbox" id="persistentMode" aria-describedby="persistentHint" onchange="setPersistentMode(this.checked)"> 执着模式
+                    </label>
+                    <span class="query-mode-hint" id="persistentHint">开启后失败/超时域名自动重试</span>
                     <span class="query-mode-hint" id="cacheHint">默认复用 1 小时内成功结果</span>
                     <span class="query-mode-hint">每次网络请求；重试会累计总耗时</span>
                     <span class="query-mode-hint" id="queryModeHint">不添加主动请求间隔</span>
@@ -1718,6 +1724,38 @@ https://www.example.com/path/to/page"></textarea>
             }
         }
 
+        // 执着模式：失败/超时域名自动重试，单次超时逐轮放宽，直到有结论或达到轮数上限
+        const PERSISTENT_STORAGE_KEY = 'domainCheckerPersistentMode';
+        let persistentRoundsLimit = 5;
+
+        function persistentModeEnabled() {
+            return Boolean(document.getElementById('persistentMode')?.checked);
+        }
+
+        function setPersistentMode(enabled, persist = true) {
+            const checkbox = document.getElementById('persistentMode');
+            if (!checkbox) return;
+            checkbox.checked = Boolean(enabled);
+            updatePersistentHint();
+            if (persist) {
+                try {
+                    localStorage.setItem(PERSISTENT_STORAGE_KEY, checkbox.checked ? '1' : '0');
+                } catch (error) { /* localStorage 不可用时不影响本次查询 */ }
+            }
+        }
+
+        function updatePersistentHint() {
+            const hint = document.getElementById('persistentHint');
+            if (!hint) return;
+            hint.textContent = persistentModeEnabled()
+                ? `失败/超时自动重试，最多 ${persistentRoundsLimit} 轮，超时逐轮放宽`
+                : '开启后失败/超时域名自动重试';
+        }
+
+        function persistentPayload() {
+            return { persistent: persistentModeEnabled() };
+        }
+
         function setResultDisplayMode(mode) {
             currentResultDisplayMode = mode === 'progressive' ? 'progressive' : 'live';
             document.querySelectorAll('.result-display-btn').forEach(button => {
@@ -1964,6 +2002,7 @@ https://www.example.com/path/to/page"></textarea>
                 timeout: parseInt(document.getElementById('cfgTimeout').value),
                 max_domains_per_batch: parseInt(document.getElementById('cfgMaxBatch').value),
                 reuse_recent_seconds: parseInt(document.getElementById('cfgReuse').value),
+                persistent_max_rounds: parseInt(document.getElementById('cfgPersistentRounds').value),
                 proxy_enabled: document.getElementById('cfgProxyEnabled').checked,
                 proxy_url: document.getElementById('cfgProxyUrl').value,
                 allow_lan_access: document.getElementById('cfgLanAccess').checked,
@@ -1992,6 +2031,9 @@ https://www.example.com/path/to/page"></textarea>
                 document.getElementById('queryTimeout').value = config.timeout;
                 document.getElementById('cfgMaxBatch').value = config.max_domains_per_batch;
                 document.getElementById('cfgReuse').value = config.reuse_recent_seconds;
+                document.getElementById('cfgPersistentRounds').value = config.persistent_max_rounds || 5;
+                persistentRoundsLimit = Math.max(1, Math.min(20, parseInt(config.persistent_max_rounds) || 5));
+                updatePersistentHint();
                 document.getElementById('cfgProxyEnabled').checked = config.proxy_enabled;
                 document.getElementById('cfgProxyUrl').value = config.proxy_url || 'http://127.0.0.1:7897';
                 document.getElementById('cfgLanAccess').checked = config.allow_lan_access !== false;
@@ -2082,6 +2124,7 @@ https://www.example.com/path/to/page"></textarea>
                         query_mode: currentQueryMode,
                         query_timeout: queryTimeoutValue(),
                         ignore_cache: document.getElementById('ignoreCache').checked,
+                        ...persistentPayload(),
                     })
                 });
                 const data = await resp.json();
@@ -2114,6 +2157,7 @@ https://www.example.com/path/to/page"></textarea>
                     platform: currentPlatform,
                     queryTimeout: queryTimeoutValue(),
                     ignoreCache: Boolean(document.getElementById('ignoreCache')?.checked),
+                    persistent: persistentModeEnabled(),
                     savedAt: Date.now(),
                 }));
             } catch (error) { /* localStorage 不可用时不影响查询 */ }
@@ -2163,6 +2207,8 @@ https://www.example.com/path/to/page"></textarea>
                 if (saved.queryTimeout) document.getElementById('queryTimeout').value = saved.queryTimeout;
                 const ignoreCache = status.ignore_cache ?? saved.ignoreCache;
                 if (ignoreCache !== undefined) document.getElementById('ignoreCache').checked = Boolean(ignoreCache);
+                const persistent = status.persistent ?? saved.persistent;
+                if (persistent !== undefined) setPersistentMode(Boolean(persistent), false);
                 isPaused = Boolean(status.paused);
                 updatePauseButton();
 
@@ -2259,7 +2305,7 @@ https://www.example.com/path/to/page"></textarea>
             return Number.isFinite(value) ? `${value.toFixed(2)} 秒` : '';
         }
 
-        function updateQueryActivity(state, operation, elapsed, completed, total, customTitle = '') {
+        function updateQueryActivity(state, operation, elapsed, completed, total, customTitle = '', persistentInfo = null) {
             const panel = document.getElementById('queryActivity');
             panel.className = `query-activity ${state}`;
             const action = operation === 'retry' ? '重新查询' : '查询';
@@ -2270,6 +2316,9 @@ https://www.example.com/path/to/page"></textarea>
             let detail = total > 0
                 ? `${completed}/${total} 个域名已完成`
                 : '正在创建任务并分配查询线程';
+            if (persistentInfo && persistentInfo.retrying > 0) {
+                detail = `已完成 ${completed}/${total} · 执着模式第 ${persistentInfo.round}/${persistentInfo.maxRounds} 轮正在重试 ${persistentInfo.retrying} 个域名`;
+            }
             if (isPaused && state === 'processing') detail += ' · 等待在途网络请求返回';
             document.getElementById('queryActivityDetail').textContent = detail;
             document.getElementById('queryElapsed').textContent = formatDuration(elapsed);
@@ -2311,8 +2360,18 @@ https://www.example.com/path/to/page"></textarea>
 
                 document.getElementById('progressFill').style.width = status.progress + '%';
                 document.getElementById('progressFill').textContent = status.progress + '%';
-                const prefix = currentOperation === 'retry' ? '重查' : '已完成';
-                document.getElementById('progressText').textContent = `${prefix} ${status.operation_completed}/${status.operation_total} · 耗时 ${formatDuration(status.elapsed_seconds)}`;
+                const persistentInfo = status.persistent ? {
+                    round: status.persistent_round || 1,
+                    maxRounds: status.persistent_max_rounds || 1,
+                    retrying: status.persistent_retrying || 0,
+                } : null;
+                const prefix = persistentInfo && persistentInfo.retrying > 0
+                    ? '重试中'
+                    : (currentOperation === 'retry' ? '重查' : '已完成');
+                const retrySuffix = persistentInfo && persistentInfo.retrying > 0
+                    ? ` · 执着模式第 ${persistentInfo.round}/${persistentInfo.maxRounds} 轮重试 ${persistentInfo.retrying} 个`
+                    : '';
+                document.getElementById('progressText').textContent = `${prefix} ${status.operation_completed}/${status.operation_total} · 耗时 ${formatDuration(status.elapsed_seconds)}${retrySuffix}`;
 
                 if (status.paused !== isPaused) {
                     isPaused = status.paused;
@@ -2346,7 +2405,9 @@ https://www.example.com/path/to/page"></textarea>
                     currentOperation,
                     status.elapsed_seconds,
                     status.operation_completed,
-                    status.operation_total
+                    status.operation_total,
+                    '',
+                    persistentInfo
                 );
 
                 if (status.status === 'completed') {
@@ -2885,7 +2946,8 @@ https://www.example.com/path/to/page"></textarea>
             if (!currentTaskId) return;
             await beginRetry(`/api/retry/${currentTaskId}`, {
                 method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
-                    domains: [domain], query_mode: currentQueryMode, query_timeout: queryTimeoutValue()
+                    domains: [domain], query_mode: currentQueryMode, query_timeout: queryTimeoutValue(),
+                    ...persistentPayload(),
                 })
             });
         }
@@ -2895,7 +2957,7 @@ https://www.example.com/path/to/page"></textarea>
             await beginRetry(`/api/retry/${currentTaskId}`, {
                 method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
                     domains: Array.from(selectedDomains), query_mode: currentQueryMode,
-                    query_timeout: queryTimeoutValue()
+                    query_timeout: queryTimeoutValue(), ...persistentPayload(),
                 })
             });
         }
@@ -2904,7 +2966,7 @@ https://www.example.com/path/to/page"></textarea>
             if (!currentTaskId) return;
             await beginRetry(`/api/retry-failed/${currentTaskId}`, {
                 method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
-                    query_mode: currentQueryMode, query_timeout: queryTimeoutValue()
+                    query_mode: currentQueryMode, query_timeout: queryTimeoutValue(), ...persistentPayload(),
                 })
             });
         }
@@ -3454,6 +3516,9 @@ https://www.example.com/path/to/page"></textarea>
         
         // 初始化
         loadTheme();
+        try {
+            setPersistentMode(localStorage.getItem(PERSISTENT_STORAGE_KEY) === '1', false);
+        } catch (error) { /* localStorage 不可用时保持默认关闭 */ }
         const savedDomainDraft = loadDomainDraft();
         if (savedDomainDraft) document.getElementById('domains').value = savedDomainDraft;
         loadConfig().then(restoreCurrentTask);

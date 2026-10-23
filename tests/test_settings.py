@@ -26,6 +26,13 @@ class TestCoerceConfigValue:
         assert coerce_config_value('timeout', 999) == 120
         assert coerce_config_value('timeout', 0) == 1
 
+    def test_persistent_rounds_are_clamped(self):
+        assert coerce_config_value('persistent_max_rounds', 0) == 1
+        assert coerce_config_value('persistent_max_rounds', 999) == 20
+        assert coerce_config_value('persistent_max_rounds', '4') == 4
+        with pytest.raises(ValueError, match='persistent_max_rounds'):
+            coerce_config_value('persistent_max_rounds', 'many')
+
     def test_invalid_numbers_and_platform_fallback(self):
         with pytest.raises(ValueError, match='max_workers'):
             coerce_config_value('max_workers', 'abc')

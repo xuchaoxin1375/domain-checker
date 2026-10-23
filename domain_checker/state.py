@@ -10,7 +10,8 @@ import time
 from datetime import datetime
 
 # task_id -> {status,total,completed,results（含 query_state）,logs,operation,operation_total,
-#             operation_completed,operation_started_at,duration_seconds,...}
+#             operation_completed,operation_started_at,duration_seconds,
+#             persistent,persistent_max_rounds,persistent_round,persistent_retrying,...}
 task_storage = {}
 task_lock = threading.Lock()
 

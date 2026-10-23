@@ -100,6 +100,10 @@ def _restore_task_from_history(task_id: str) -> bool:
         'query_mode': 'unlimited',
         'query_timeout': normalize_timeout(saved_config.get('timeout', CONFIG['timeout'])),
         'ignore_cache': False,
+        'persistent': False,
+        'persistent_max_rounds': CONFIG.get('persistent_max_rounds', 5),
+        'persistent_round': 1,
+        'persistent_retrying': 0,
         'operation_total': 0,
         'operation_completed': 0,
         'operation_started_at': completed_at,
@@ -193,8 +197,10 @@ def _register_routes(flask_app: Flask):
         platform = data.get('platform', 'rdap')
         query_mode = normalize_query_mode(data.get('query_mode', data.get('mode', 'unlimited')))
         ignore_cache = bool(data.get('ignore_cache', False))
+        persistent = bool(data.get('persistent', False))
         with config_lock:
             query_timeout = normalize_timeout(data.get('query_timeout', CONFIG['timeout']))
+            persistent_max_rounds = int(CONFIG.get('persistent_max_rounds', 5))
 
         # 解析输入（支持URL格式）
         domains = parse_domain_input(input_text)
@@ -223,6 +229,10 @@ def _register_routes(flask_app: Flask):
                 'query_mode': query_mode,
                 'query_timeout': query_timeout,
                 'ignore_cache': ignore_cache,
+                'persistent': persistent,
+                'persistent_max_rounds': persistent_max_rounds,
+                'persistent_round': 1,
+                'persistent_retrying': 0,
                 'operation_total': len(domains), 'operation_completed': 0,
                 'operation_started_at': datetime.now().isoformat(),
                 'duration_seconds': None,
@@ -241,9 +251,11 @@ def _register_routes(flask_app: Flask):
             'query_mode': query_mode,
             'query_timeout': query_timeout,
             'ignore_cache': ignore_cache,
+            'persistent': persistent,
             'message': (
                 f'任务已创建，使用{PLATFORMS.get(platform, {}).get("name", platform)}处理 {len(domains)} 个域名'
                 + ('；已忽略缓存，将全部联网查询' if ignore_cache else '')
+                + (f'；执着模式最多 {persistent_max_rounds} 轮' if persistent else '')
             )
         })
 
@@ -273,6 +285,10 @@ def _register_routes(flask_app: Flask):
             'query_mode': task.get('query_mode', 'unlimited'),
             'query_timeout': task.get('query_timeout'),
             'ignore_cache': task.get('ignore_cache', False),
+            'persistent': task.get('persistent', False),
+            'persistent_round': task.get('persistent_round', 1),
+            'persistent_max_rounds': task.get('persistent_max_rounds', 1),
+            'persistent_retrying': task.get('persistent_retrying', 0),
             'operation': operation,
             'operation_total': operation_total,
             'operation_completed': operation_completed,
@@ -370,6 +386,7 @@ def _register_routes(flask_app: Flask):
             return jsonify({'error': '请选择域名'}), 400
         with config_lock:
             default_timeout = CONFIG['timeout']
+            persistent_max_rounds = int(CONFIG.get('persistent_max_rounds', 5))
 
         if not _restore_task_from_history(task_id):
             return jsonify({'error': '任务不存在或尚无可重查结果'}), 404
@@ -384,11 +401,16 @@ def _register_routes(flask_app: Flask):
                 return jsonify({'error': f'域名不属于当前任务: {", ".join(unknown_domains)}'}), 400
             query_mode = normalize_query_mode(data.get('query_mode', data.get('mode', task.get('query_mode', 'unlimited'))))
             query_timeout = normalize_timeout(data.get('query_timeout', task.get('query_timeout', default_timeout)))
+            persistent = bool(data.get('persistent', task.get('persistent', False)))
             task['refresh'] = True
             task['status'] = 'processing'
             task['operation'] = 'retry'
             task['query_mode'] = query_mode
             task['query_timeout'] = query_timeout
+            task['persistent'] = persistent
+            task['persistent_max_rounds'] = persistent_max_rounds
+            task['persistent_round'] = 1
+            task['persistent_retrying'] = 0
             task['operation_total'] = len(domains)
             task['operation_completed'] = 0
             task['operation_started_at'] = datetime.now().isoformat()
@@ -409,6 +431,7 @@ def _register_routes(flask_app: Flask):
         return jsonify({
             'message': f'正在重新查询 {len(domains)} 个域名',
             'started': True,
+            'persistent': persistent,
             'domains': domains,
         })
 
@@ -417,6 +440,7 @@ def _register_routes(flask_app: Flask):
         data = request.get_json(silent=True) or {}
         with config_lock:
             default_timeout = CONFIG['timeout']
+            persistent_max_rounds = int(CONFIG.get('persistent_max_rounds', 5))
         if not _restore_task_from_history(task_id):
             return jsonify({'error': '任务不存在或尚无可重查结果'}), 404
         with task_lock:
@@ -425,6 +449,7 @@ def _register_routes(flask_app: Flask):
                 return jsonify({'error': '任务正在查询，请等待当前操作结束'}), 409
             query_mode = normalize_query_mode(data.get('query_mode', data.get('mode', task.get('query_mode', 'unlimited'))))
             query_timeout = normalize_timeout(data.get('query_timeout', task.get('query_timeout', default_timeout)))
+            persistent = bool(data.get('persistent', task.get('persistent', False)))
             failed_domains = [r['domain'] for r in task['results']
                               if (r['status'] in {'failed', 'timeout', 'invalid'}
                                   or (r['status'] == 'success' and r.get('resolved') is None))]
@@ -435,6 +460,10 @@ def _register_routes(flask_app: Flask):
             task['operation'] = 'retry'
             task['query_mode'] = query_mode
             task['query_timeout'] = query_timeout
+            task['persistent'] = persistent
+            task['persistent_max_rounds'] = persistent_max_rounds
+            task['persistent_round'] = 1
+            task['persistent_retrying'] = 0
             task['operation_total'] = len(failed_domains)
             task['operation_completed'] = 0
             task['operation_started_at'] = datetime.now().isoformat()
@@ -456,6 +485,7 @@ def _register_routes(flask_app: Flask):
         return jsonify({
             'message': f'正在重查 {len(failed_domains)} 个查询异常或解析未知的域名',
             'started': True,
+            'persistent': persistent,
             'domains': failed_domains,
         })
 

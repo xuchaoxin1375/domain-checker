@@ -187,6 +187,79 @@ class TestQueryValidation:
             with task_lock:
                 task_storage.pop(data['task_id'], None)
 
+    def test_query_accepts_persistent_mode(self, client, monkeypatch):
+        from domain_checker.settings import CONFIG
+
+        monkeypatch.setattr('domain_checker.web.process_domains_async', lambda *args: None)
+        resp = client.post('/api/query', json={'domains': 'stubborn.com', 'persistent': True})
+        data = resp.get_json()
+        try:
+            assert resp.status_code == 200
+            assert data['persistent'] is True
+            assert '执着模式' in data['message']
+            with task_lock:
+                task = task_storage[data['task_id']]
+                assert task['persistent'] is True
+                assert task['persistent_max_rounds'] == CONFIG['persistent_max_rounds']
+                assert task['persistent_round'] == 1
+                assert task['persistent_retrying'] == 0
+            status = client.get(f"/api/status/{data['task_id']}").get_json()
+            assert status['persistent'] is True
+            assert status['persistent_max_rounds'] == CONFIG['persistent_max_rounds']
+            assert status['persistent_round'] == 1
+            assert status['persistent_retrying'] == 0
+        finally:
+            with task_lock:
+                task_storage.pop(data['task_id'], None)
+
+    def test_persistent_query_runs_extra_round_through_status(self, client, monkeypatch):
+        calls = []
+
+        def fake_run_pool(domains, task_id, max_workers, track_operation=False,
+                          query_mode='unlimited', query_timeout=None, platform='rdap',
+                          reuse_map=None):
+            calls.append(query_timeout)
+            with task_lock:
+                task = task_storage[task_id]
+                for result in task['results']:
+                    if result['domain'] not in domains:
+                        continue
+                    if result.get('query_state') != 'completed':
+                        task['completed'] += 1
+                    if len(calls) == 1:
+                        result.update({'status': 'timeout', 'resolved': None,
+                                       'error': 'WHOIS 查询超时'})
+                    else:
+                        result.update({'status': 'success', 'resolved': True, 'error': None})
+                    result['query_state'] = 'completed'
+                if track_operation:
+                    task['operation_completed'] = len(domains)
+
+        monkeypatch.setattr('domain_checker.tasks._run_pool', fake_run_pool)
+        for name in ('save_history', 'save_result', 'save_results', 'update_history_counts'):
+            monkeypatch.setattr(f'domain_checker.tasks.{name}', lambda *args: None)
+
+        resp = client.post('/api/query', json={
+            'domains': 'stubborn.com', 'persistent': True, 'query_timeout': 5,
+        })
+        task_id = resp.get_json()['task_id']
+        try:
+            status = {}
+            for _ in range(80):
+                status = client.get(f'/api/status/{task_id}').get_json()
+                if status['status'] == 'completed':
+                    break
+                time.sleep(0.02)
+
+            assert calls == [5, 10]
+            assert status['status'] == 'completed'
+            assert status['persistent'] is True
+            assert status['persistent_round'] == 2
+            assert status['persistent_retrying'] == 0
+        finally:
+            with task_lock:
+                task_storage.pop(task_id, None)
+
     def test_query_defaults_to_unlimited_and_accepts_task_timeout(self, client, monkeypatch):
         monkeypatch.setattr('domain_checker.web.process_domains_async', lambda domains, task_id: None)
         resp = client.post('/api/query', json={'domains': 'example.com', 'query_timeout': 999})
@@ -379,6 +452,35 @@ class TestTaskEndpoints:
         finally:
             with task_lock:
                 task_storage.pop('RETRY01', None)
+
+    def test_retry_accepts_persistent_override(self, client, monkeypatch):
+        from domain_checker.settings import CONFIG
+
+        monkeypatch.setattr('domain_checker.web.retry_domains_async', lambda *args: None)
+        now = datetime.now().isoformat()
+        with task_lock:
+            task_storage['RETRYP1'] = {
+                'status': 'completed', 'total': 1, 'completed': 1,
+                'results': [{
+                    'domain': 'b.com', 'status': 'timeout', 'query_state': 'completed',
+                    'query_time': '2026-10-23 10:00:00', 'query_duration_seconds': 1.0,
+                }],
+                'logs': [], 'refresh': False, 'created_at': now, 'completed_at': now,
+                'persistent': False,
+            }
+        try:
+            resp = client.post('/api/retry/RETRYP1', json={'domains': ['b.com'], 'persistent': True})
+            assert resp.status_code == 200
+            assert resp.get_json()['persistent'] is True
+            status = client.get('/api/status/RETRYP1').get_json()
+            assert status['persistent'] is True
+            assert status['persistent_max_rounds'] == CONFIG['persistent_max_rounds']
+            assert status['persistent_round'] == 1
+            with task_lock:
+                assert task_storage['RETRYP1']['persistent'] is True
+        finally:
+            with task_lock:
+                task_storage.pop('RETRYP1', None)
 
     def test_retry_restores_completed_task_from_history(self, client, monkeypatch):
         db.save_history('RESTORE01', ['saved.com'], 'processing')

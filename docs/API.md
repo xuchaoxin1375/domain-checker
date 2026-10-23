@@ -26,6 +26,7 @@ Base URL：`http://localhost:5000`（或启动日志输出的地址）。所有�
   "timeout": 15,                  // WHOIS/RDAP/DNS/HTTP 单次网络请求超时，范围 1-120
   "max_workers": 5,               // 每个任务的并发线程数，范围 1-32
   "reuse_recent_seconds": 3600,   // 最近成功结果复用窗口（秒，默认 1 小时），0 表示关闭
+  "persistent_max_rounds": 5,     // 执着模式最多查询轮数（含首轮），1-20
   "proxy_enabled": false,
   "proxy_url": "http://127.0.0.1:7897",
   "platform": "rdap",             // rdap（默认）| whois | whoisxml
@@ -54,6 +55,7 @@ Body 为任意配置键子集，类型自动转换；修改后自动写入 `data
 它不是单域名或整批任务总时限；重试、RDAP 回退和后续探测会累计计入查询耗时。
 `max_workers` 为每个任务的线程池上限（1-32），任务开始后修改只影响后续任务；
 `reuse_recent_seconds` 控制最近成功结果的复用窗口（0-86400 秒，0 表示关闭）。
+`persistent_max_rounds` 控制执着模式最多查询轮数（1-20，含首轮）。
 数值项超出范围会自动收敛到边界；无法转换为数字时返回 `400`，且整次请求不会部分生效。
 
 ```bash
@@ -78,11 +80,12 @@ curl -X POST localhost:5000/api/config \
 ```jsonc
 // 请求：domains 为多行文本（支持 URL 混排，自动提取域名并去重）
 { "domains": "example.com\nhttps://www.qq.com/path", "platform": "rdap",
-  "query_mode": "unlimited", "query_timeout": 15, "ignore_cache": false }
+  "query_mode": "unlimited", "query_timeout": 15, "ignore_cache": false, "persistent": false }
 
 // 响应
 { "task_id": "0728111007366", "total": 2, "platform": "rdap",
-  "query_mode": "unlimited", "query_timeout": 15, "ignore_cache": false, "message": "任务已创建，..." }
+  "query_mode": "unlimited", "query_timeout": 15, "ignore_cache": false,
+  "persistent": false, "message": "任务已创建，..." }
 ```
 
 `query_mode` 可选 `unlimited`（默认，不添加主动等待）、`standard`（按配置限流）、`quick`
@@ -97,6 +100,12 @@ curl -X POST localhost:5000/api/config \
 发起 RDAP/WHOIS/DNS 请求。`ignore_cache=true` 时本任务跳过复用、全部重新联网查询；重查接口
 （`/api/retry`、`/api/retry-failed`）始终强制联网查询，不受复用影响。
 
+`persistent=true` 开启执着模式：首轮结束后，把所有 `failed`、`timeout` 以及
+`status=success && resolved=null`（解析未知）的域名自动重新入队，直到得到结论或达到
+`persistent_max_rounds`（含首轮）。第 2 轮起单次请求超时按轮次翻倍（`2×(n-1)` 倍），
+并由服务端封顶在 120 秒；`not_registered`、`invalid` 和已有明确解析结论的成功结果不会重试。
+轮次与剩余重试数量通过状态接口的 `persistent_round` / `persistent_retrying` 暴露。
+
 错误：`400` 无有效域名；`400` 超过 `max_domains_per_batch`。
 
 ### GET /api/status/{task_id}
@@ -105,6 +114,7 @@ curl -X POST localhost:5000/api/config \
 { "status": "processing|completed|cancelled", "total": 403, "completed": 120,
   "progress": 50.0, "paused": false,
   "query_mode": "quick", "ignore_cache": false,
+  "persistent": false, "persistent_round": 1, "persistent_max_rounds": 5, "persistent_retrying": 0,
   "operation": "query|retry|completed", "operation_total": 20, "operation_completed": 10,
   "elapsed_seconds": 12.34, "duration_seconds": null }
 ```
@@ -181,19 +191,21 @@ HTTP 探测及等待时间合计的完整流水线耗时，因此可以大于 `q
 
 ```jsonc
 // 请求
-{ "domains": ["a.com", "b.com"] }
+{ "domains": ["a.com", "b.com"], "persistent": false }
 // 响应
-{ "message": "正在重新查询 2 个域名", "started": true, "domains": ["a.com", "b.com"] }
+{ "message": "正在重新查询 2 个域名", "started": true, "persistent": false, "domains": ["a.com", "b.com"] }
 ```
 
 按"同域名覆盖"更新任务结果；若服务重启后任务已不在内存，会先从 SQLite 历史恢复再重查。
 重查期间任务恢复为 `processing`，状态接口的 `operation=retry`；当前已有查询或重查在运行时返回 `409`。`domains`
 必须是数组，规范化去重后每个域名都必须属于该任务已有结果，否则返回 `400`。
+重查请求可带 `persistent` 覆盖该任务的执着模式；省略时沿用任务创建时的设置。
 
 ### POST /api/retry-failed/{task_id}
 
 重查该任务下所有 `failed`、`timeout`、`invalid`，以及 `status=success && resolved=null` 的域名；
-确定性 `not_registered` 不自动重查；无异常或解析未知项时返回提示消息。
+确定性 `not_registered` 不自动重查；无异常或解析未知项时返回提示消息。请求可带 `persistent`
+控制重查结束后的自动重试，语义与 `/api/retry` 相同。
 
 ### GET /api/operations?limit=100
 
